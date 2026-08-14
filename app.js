@@ -179,10 +179,10 @@
   const AI_CONFIG_KEY = "fault-diagnosis-ai-config-v1";
 
   const DEFAULT_AI_CONFIG = {
-    // 🔑 在此处填入你的 DeepSeek API Key（替换下方占位符）
-    //    前端 UI 只会显示后四位（••••xxxx），但浏览器 F12 能看到完整 Key。
-    //    如果你希望更安全，可以改为后端代理方案（见 worker/ 目录）。
-    apiKey: "sk-your-deepseek-api-key-here",
+    // 🔑 共享的 DeepSeek API Key：所有打开网页的人都会使用此 Key（已硬编码在前端）
+    //    界面上只显示后四位（••••xxxx），但注意：浏览器 F12 源码中能看到完整 Key。
+    //    如需更安全，应改为后端代理方案（把 Key 存到云函数环境变量，前端只调云函数）。
+    apiKey: "sk-ec5cc2ce10cc4405bf5ddf4ed4bffbe5",
     model: DEEPSEEK_MODEL,
     enabled: true
   };
