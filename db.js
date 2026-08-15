@@ -190,6 +190,14 @@
     async test() {
       return apiFetch("/ai/test", { method: "POST" });
     },
+
+    /** AI 聊天助手（结合知识库回答），返回 { answer } */
+    async chat(payload) {
+      return apiFetch("/ai/chat", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
   };
 
   // ======================================================================

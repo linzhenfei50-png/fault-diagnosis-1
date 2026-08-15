@@ -72,6 +72,15 @@
     apiKeyStatus: $("#apiKeyStatus"),
     testApiBtn: $("#testApiBtn"),
 
+    // 聊天助手
+    chatToggleBtn: $("#chatToggleBtn"),
+    chatCloseBtn: $("#chatCloseBtn"),
+    chatPanel: $("#chatPanel"),
+    chatMessages: $("#chatMessages"),
+    chatForm: $("#chatForm"),
+    chatInput: $("#chatInput"),
+    chatSendBtn: $("#chatSendBtn"),
+
     // 历史面板
     historySearch: $("#historySearch"),
     historyDeviceFilter: $("#historyDeviceFilter"),
@@ -1687,6 +1696,95 @@
     if (!els.apiSettings.classList.contains("hidden")) {
       refreshApiKeyUI();
     }
+  });
+
+  /* ================================================================
+   *  右下角 AI 聊天助手（基于知识库回答）
+   * ================================================================ */
+  let chatHistory = []; // { role: 'user' | 'assistant', content }
+
+  function buildChatKnowledgeContext(question) {
+    return mergedDatabase
+      .map(item => scoreFault(item, question, ""))
+      .filter(s => s.rawScore > 0)
+      .sort((a, b) => b.rawScore - a.rawScore)
+      .slice(0, 3)
+      .map(s => ({
+        title: s.item.title,
+        deviceType: s.item.deviceType,
+        summary: s.item.summary,
+        causes: (s.item.causes || []).map(c => c && c.name).filter(Boolean),
+        solutions: (s.item.solutions || []).map(x => x && x.action).filter(Boolean),
+      }));
+  }
+
+  function renderChatMessage(role, content, extraClass = "") {
+    const div = document.createElement("div");
+    div.className = `chat-msg ${role} ${extraClass}`.trim();
+    div.textContent = content;
+    els.chatMessages.appendChild(div);
+    els.chatMessages.scrollTop = els.chatMessages.scrollHeight;
+    return div;
+  }
+
+  function openChat() {
+    els.chatPanel.classList.remove("hidden");
+    els.chatPanel.setAttribute("aria-hidden", "false");
+    if (!els.chatMessages.children.length) {
+      renderChatMessage("assistant", "你好！我是 AI 故障助手，可以结合知识库回答设备故障相关问题。请问遇到了什么问题？");
+    }
+    els.chatInput.focus();
+  }
+
+  function closeChat() {
+    els.chatPanel.classList.add("hidden");
+    els.chatPanel.setAttribute("aria-hidden", "true");
+  }
+
+  async function sendChatMessage() {
+    const text = els.chatInput.value.trim();
+    if (!text) return;
+
+    els.chatInput.value = "";
+    chatHistory.push({ role: "user", content: text });
+    renderChatMessage("user", text);
+
+    if (!aiReady) {
+      renderChatMessage("assistant", "AI 服务未就绪，请稍后在「⚙ AI 设置」里测试连接，或确认后端已配置 DeepSeek API Key。");
+      return;
+    }
+
+    const typing = renderChatMessage("assistant", "思考中…", "typing");
+    els.chatSendBtn.disabled = true;
+    els.chatInput.disabled = true;
+
+    try {
+      const knowledgeContext = buildChatKnowledgeContext(text);
+      const result = await window.FaultDB.ai.chat({
+        messages: chatHistory.slice(-10),
+        knowledgeContext,
+      });
+      const answer = result?.answer || "（未收到回复，请稍后重试）";
+      typing.remove();
+      chatHistory.push({ role: "assistant", content: answer });
+      renderChatMessage("assistant", answer);
+    } catch (e) {
+      typing.remove();
+      renderChatMessage("assistant", "抱歉，请求出错了：" + e.message);
+    } finally {
+      els.chatSendBtn.disabled = false;
+      els.chatInput.disabled = false;
+      els.chatInput.focus();
+    }
+  }
+
+  els.chatToggleBtn.addEventListener("click", () => {
+    els.chatPanel.classList.contains("hidden") ? openChat() : closeChat();
+  });
+  els.chatCloseBtn.addEventListener("click", closeChat);
+  els.chatForm.addEventListener("submit", (e) => {
+    e.preventDefault();
+    sendChatMessage();
   });
 
   /* ================================================================

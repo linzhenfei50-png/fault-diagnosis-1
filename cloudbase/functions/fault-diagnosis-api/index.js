@@ -542,6 +542,53 @@ async function aiTest() {
   return json({ ok: true });
 }
 
+const CHAT_SYSTEM_PROMPT = `你是「智能故障诊断系统」的 AI 助手，一名资深工业设备故障诊断专家。
+用中文回答用户关于设备故障诊断的问题。
+
+规则：
+- 优先基于【参考知识库】中的条目回答，简明扼要地引用相关条目内容。
+- 若知识库没有直接相关内容，可结合通用工业设备知识回答，但要注明是通用建议、建议现场核实。
+- 回答要实用、分点、简洁，避免冗长和空话。`;
+
+async function aiChat(body) {
+  if (!body || typeof body !== 'object') return error('请求体无效', 400);
+
+  const rawMessages = Array.isArray(body.messages) ? body.messages : [];
+  const knowledgeContext = Array.isArray(body.knowledgeContext) ? body.knowledgeContext : [];
+
+  // 只保留 user/assistant 消息，截断每条长度，最多取最近 10 条
+  const messages = rawMessages
+    .filter((m) => m && (m.role === 'user' || m.role === 'assistant'))
+    .map((m) => ({ role: m.role, content: String(m.content || '').slice(0, 2000) }))
+    .slice(-10);
+
+  if (!messages.length) return error('缺少有效的 messages', 400);
+
+  const knowledgeText = knowledgeContext.length
+    ? `\n\n【参考知识库】\n${knowledgeContext.map((k, i) => {
+        const title = String(k.title || '').slice(0, 60);
+        const summary = String(k.summary || '').slice(0, 300);
+        const causes = (Array.isArray(k.causes) ? k.causes : []).map(String).slice(0, 6).join('、');
+        const solutions = (Array.isArray(k.solutions) ? k.solutions : []).map(String).slice(0, 6).join('、');
+        return `${i + 1}. ${title}\n   摘要：${summary}\n   可能原因：${causes}\n   解决措施：${solutions}`;
+      }).join('\n')}`
+    : '';
+
+  // 把知识库上下文附在最后一条用户消息上
+  const toSend = messages.map((m, i) => (
+    i === messages.length - 1 && m.role === 'user'
+      ? { role: 'user', content: m.content + knowledgeText }
+      : m
+  ));
+
+  const content = await callDeepSeek([
+    { role: 'system', content: CHAT_SYSTEM_PROMPT },
+    ...toSend,
+  ], { temperature: 0.5, max_tokens: 1500, top_p: 0.9 });
+
+  return json({ answer: content });
+}
+
 // ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
@@ -576,6 +623,7 @@ const ROUTES = [
   { method: 'POST',   pattern: /^\/ai\/diagnose\/?$/,        handler: (body) => aiDiagnose(body) },
   { method: 'POST',   pattern: /^\/ai\/parse\/?$/,           handler: (body) => aiParse(body) },
   { method: 'POST',   pattern: /^\/ai\/test\/?$/,            handler: () => aiTest() },
+  { method: 'POST',   pattern: /^\/ai\/chat\/?$/,            handler: (body) => aiChat(body) },
 ];
 
 // ---------------------------------------------------------------------------

@@ -437,6 +437,28 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
     </div>
   </dialog>
 
+  <!-- ==================== 右下角 AI 聊天助手 ==================== -->
+  <div class="chat-widget">
+    <button id="chatToggleBtn" class="chat-fab" type="button" title="AI 故障助手">
+      <img src="./assistant.png" alt="AI 助手" />
+    </button>
+    <div id="chatPanel" class="chat-panel hidden" aria-hidden="true">
+      <div class="chat-header">
+        <img src="./assistant.png" alt="" class="chat-header-avatar" />
+        <div class="chat-header-text">
+          <strong>AI 故障助手</strong>
+          <small>基于知识库回答</small>
+        </div>
+        <button id="chatCloseBtn" class="chat-close" type="button" title="关闭">✕</button>
+      </div>
+      <div id="chatMessages" class="chat-messages"></div>
+      <form id="chatForm" class="chat-input-row" autocomplete="off">
+        <input id="chatInput" type="text" placeholder="问我设备故障问题…" maxlength="500" />
+        <button type="submit" class="chat-send" id="chatSendBtn">发送</button>
+      </form>
+    </div>
+  </div>
+
   <script src="./db.js"></script>
   <script src="./data/faults.js"></script>
   <script src="./app.js"></script>
