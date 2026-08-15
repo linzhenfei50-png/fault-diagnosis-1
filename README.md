@@ -108,14 +108,15 @@ tcb fn deploy fault-diagnosis-api --httpFn --force
 ```js
 {
   id: "唯一编号",
-  deviceType: "设备类型",
+  circuit: "电路类型",     // 取值见 data/circuits.js 的 CIRCUIT_TYPES
   title: "方案标题",
   symptoms: ["故障现象1"],
-  keywords: ["关键词1", "关键词2"],
+  keywords: ["关键词1", "关键词2"],   // 可选
   summary: "诊断摘要",
   severity: "高",          // 高 / 中 / 低
   shutdownRequired: true,
   estimatedTime: "30 分钟",
+  faultCount: 3,           // 故障数量（发生次数，默认 1）
   causes: [{ name: "原因", probability: 60, evidence: "依据" }],
   solutions: [{ action: "步骤", detail: "说明", tools: ["工具"], duration: "耗时" }],
   diagram: [{ title: "节点", description: "说明" }],

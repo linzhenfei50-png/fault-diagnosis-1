@@ -115,7 +115,7 @@ async function saveFaults(entries) {
 
   for (const entry of entries) {
     const doc = {
-      deviceType: entry.deviceType || '通用',
+      circuit: entry.circuit || entry.deviceType || '通用',
       title: entry.title,
       symptoms: entry.symptoms || [],
       keywords: entry.keywords || [],
@@ -123,6 +123,7 @@ async function saveFaults(entries) {
       severity: entry.severity || '中',
       shutdownRequired: Boolean(entry.shutdownRequired),
       estimatedTime: entry.estimatedTime || '',
+      faultCount: Math.max(1, parseInt(entry.faultCount) || 1),
       causes: entry.causes || [],
       solutions: entry.solutions || [],
       diagram: entry.diagram || [],
@@ -175,7 +176,7 @@ async function searchHistory(query) {
 
   const filtered = (res.data || [])
     .filter((r) => {
-      const haystack = [r.input, r.title, r.deviceType, (r.matchedKeywords || []).join(' ')]
+      const haystack = [r.input, r.title, (r.circuit || r.deviceType), (r.matchedKeywords || []).join(' ')]
         .join(' ')
         .toLowerCase();
       return haystack.includes(q);
@@ -203,7 +204,7 @@ async function saveHistory(record) {
 
   const res = await db.collection('diagnosis_history').add({
     input: record.input || '',
-    deviceType: record.deviceType || '',
+    circuit: record.circuit || record.deviceType || '',
     faultId: record.faultId || '',
     title: record.title || '',
     severity: record.severity || '',
@@ -463,18 +464,21 @@ const PARSE_SYSTEM_PROMPT = `你是一个工业设备故障数据录入助手。
 
 {
   "id": "唯一英文ID，如 rs485-resistor-burn",
-  "deviceType": "设备类型，如 通讯电路板",
+  "circuit": "电路类型，如 RS485通讯电路",
   "title": "故障标题，20字以内",
   "symptoms": ["故障现象1", "故障现象2"],
   "keywords": ["关键词1", "关键词2"],
   "summary": "诊断摘要，80-150字",
   "severity": "高/中/低",
   "shutdownRequired": true或false,
+  "faultCount": 1,
   "causes": [{"name": "原因", "probability": 40, "evidence": "依据"}],
   "solutions": [{"action": "措施", "detail": "说明", "tools": ["工具"], "duration": "耗时"}],
   "diagram": [{"title": "步骤", "description": "说明"}],
   "safety": "安全提示"
 }
+
+keywords 可为空数组。
 
 只返回JSON，不要markdown标记。`;
 
@@ -488,15 +492,17 @@ async function aiDiagnose(body) {
   }
 
   const symptom = String(body.symptom).slice(0, 300);
-  const deviceType = body.deviceType ? String(body.deviceType) : '';
+  const circuits = Array.isArray(body.circuits)
+    ? body.circuits.filter(Boolean).map(String)
+    : (body.circuit ? [String(body.circuit)] : []);
   const knowledgeContext = Array.isArray(body.knowledgeContext) ? body.knowledgeContext : [];
 
-  const deviceInfo = deviceType ? `设备类型：${deviceType}` : '设备类型：未指定';
+  const circuitInfo = circuits.length ? `电路类型：${circuits.join('、')}` : '电路类型：未指定';
   const knowledgeText = knowledgeContext.length
     ? `\n【参考知识库】\n${knowledgeContext.map((k, i) => `${i + 1}. ${k.title}：${k.summary}\n   可能原因：${(k.causes || []).join('、')}\n   解决措施：${(k.solutions || []).join('、')}`).join('\n')}`
     : '';
 
-  const userMessage = `${deviceInfo}\n【故障现象】${symptom}${knowledgeText}\n\n请按照系统提示的 JSON 格式返回诊断结果，采用排除法进行推理分析。只返回 JSON，不要包含 markdown 代码块标记。`;
+  const userMessage = `${circuitInfo}\n【故障现象】${symptom}${knowledgeText}\n\n请按照系统提示的 JSON 格式返回诊断结果，采用排除法进行推理分析。只返回 JSON，不要包含 markdown 代码块标记。`;
 
   const content = await callDeepSeek([
     { role: 'system', content: DIAGNOSE_SYSTEM_PROMPT },
@@ -506,7 +512,7 @@ async function aiDiagnose(body) {
   const result = extractJson(content);
   return json({
     id: 'ai-' + Date.now(),
-    deviceType: deviceType || '通用',
+    circuit: circuits.join('、') || '通用',
     title: result.title || '故障诊断结果',
     symptoms: [symptom],
     keywords: result.causes?.map(c => c.name) || [],

@@ -63,15 +63,14 @@
             </div>
           </div>
 
-          <div class="field-grid">
+          <div class="field-grid" style="grid-template-columns:1fr; gap:16px;">
             <label class="field">
-              <span>设备类型</span>
-              <select id="deviceType">
-                <option value="">全部设备</option>
-              </select>
+              <span>电路类型</span>
+              <div id="circuitFilter" class="circuit-filter" role="group" aria-label="电路类型（可多选）"></div>
+              <small>可多选，不选则匹配全部电路</small>
             </label>
 
-            <label class="field field-wide">
+            <label class="field">
               <span>故障现象</span>
               <textarea id="symptomInput" rows="4" maxlength="300"
                 placeholder="例如：电机启动后有嗡嗡声，但转轴不转，十秒后保护器跳闸。"></textarea>
@@ -129,6 +128,7 @@
                 <span id="severityBadge" class="badge">—</span>
                 <span id="timeBadge" class="badge secondary">—</span>
                 <span id="shutdownBadge" class="badge secondary">—</span>
+                <button id="saveToKbBtn" class="outline-button small" type="button">💾 保存到知识库</button>
               </div>
             </div>
             <p class="report-summary" id="resultSummary">—</p>
@@ -147,7 +147,7 @@
                 <span id="identifySymptom">—</span>
               </div>
               <div class="step-row">
-                <span class="step-label">设备 / 子系统</span>
+                <span class="step-label">电路</span>
                 <span id="identifyDevice">—</span>
               </div>
               <div class="step-row">
@@ -248,9 +248,9 @@
               <input type="text" id="historySearch" placeholder="按故障现象、设备、诊断结果搜索…" />
             </div>
             <div class="field" style="width:160px;">
-              <span>设备筛选</span>
-              <select id="historyDeviceFilter">
-                <option value="">全部设备</option>
+              <span>电路筛选</span>
+              <select id="historyCircuitFilter">
+                <option value="">全部电路</option>
               </select>
             </div>
           </div>
@@ -349,11 +349,14 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
                 </div>
                 <div class="field-grid" style="grid-template-columns:1fr 1fr; gap:10px;">
                   <label class="field"><span>故障 ID</span><input type="text" id="textEntryId" placeholder="唯一标识，如 rs485-resistor-burn" /></label>
-                  <label class="field"><span>设备类型</span><input type="text" id="textEntryDevice" placeholder="如 通讯电路板" /></label>
+                  <label class="field"><span>电路类型</span><select id="textEntryCircuit"></select></label>
                 </div>
-                <label class="field" style="margin-top:8px;"><span>故障标题</span><input type="text" id="textEntryTitle" placeholder="简要标题" /></label>
+                <div class="field-grid" style="grid-template-columns:1fr 1fr; gap:10px; margin-top:8px;">
+                  <label class="field"><span>故障标题</span><input type="text" id="textEntryTitle" placeholder="简要标题" /></label>
+                  <label class="field"><span>故障数量</span><input type="number" id="textEntryFaultCount" min="1" step="1" value="1" /></label>
+                </div>
                 <label class="field" style="margin-top:8px;"><span>故障现象</span><input type="text" id="textEntrySymptoms" placeholder="如：A、B线路限流电阻烧毁" /></label>
-                <label class="field" style="margin-top:8px;"><span>关键词（逗号分隔）</span><input type="text" id="textEntryKeywords" placeholder="如：RS485, 电阻, 烧毁, 限流" /></label>
+                <label class="field" style="margin-top:8px;"><span>关键词（可选，逗号分隔）</span><input type="text" id="textEntryKeywords" placeholder="如：RS485, 电阻, 烧毁, 限流（可留空）" /></label>
                 <label class="field" style="margin-top:8px;"><span>诊断摘要</span><textarea id="textEntrySummary" rows="2" placeholder="对故障的简要分析…"></textarea></label>
                 <label class="field" style="margin-top:8px;">
                   <span>严重等级</span>
@@ -390,9 +393,12 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
                 <div class="section-heading"><h2>录入故障信息</h2></div>
                 <div class="field-grid" style="grid-template-columns:1fr 1fr;">
                   <label class="field"><span>故障 ID</span><input type="text" id="imageEntryId" placeholder="如 rs485-resistor-burn" /></label>
-                  <label class="field"><span>设备类型</span><input type="text" id="imageEntryDevice" placeholder="如 通讯电路板" /></label>
+                  <label class="field"><span>电路类型</span><select id="imageEntryCircuit"></select></label>
                 </div>
-                <label class="field" style="margin-top:10px;"><span>故障标题</span><input type="text" id="imageEntryTitle" placeholder="简要描述故障" /></label>
+                <div class="field-grid" style="grid-template-columns:1fr 1fr; margin-top:10px;">
+                  <label class="field"><span>故障标题</span><input type="text" id="imageEntryTitle" placeholder="简要描述故障" /></label>
+                  <label class="field"><span>故障数量</span><input type="number" id="imageEntryFaultCount" min="1" step="1" value="1" /></label>
+                </div>
                 <label class="field" style="margin-top:10px;"><span>故障描述</span><textarea id="imageEntryDesc" rows="3" placeholder="详细描述图片中的故障现象…"></textarea></label>
                 <button id="saveImageEntryBtn" class="primary-button" type="button" style="margin-top:12px;">保存条目</button>
               </div>
@@ -437,6 +443,30 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
     </div>
   </dialog>
 
+  <!-- ==================== 保存诊断结果到知识库 ==================== -->
+  <dialog id="saveToKbDialog" class="modal">
+    <div class="modal-content">
+      <h2>💾 保存诊断结果到知识库</h2>
+      <label class="field">
+        <span>目标电路</span>
+        <select id="saveKbCircuit"></select>
+      </label>
+      <div class="field">
+        <span>保存方式</span>
+        <label class="save-kb-mode"><input type="radio" name="saveKbMode" value="existing" checked /> 累加到已有故障（故障数量 +1）</label>
+        <label class="save-kb-mode"><input type="radio" name="saveKbMode" value="new" /> 新建知识条目</label>
+      </div>
+      <label class="field" id="saveKbExistingWrap">
+        <span>选择已有故障</span>
+        <select id="saveKbExisting"></select>
+      </label>
+      <div style="display:flex; gap:10px; justify-content:flex-end;">
+        <button id="saveKbCancel" class="outline-button" type="button">取消</button>
+        <button id="saveKbConfirm" class="primary-button" type="button">保存</button>
+      </div>
+    </div>
+  </dialog>
+
   <!-- ==================== 右下角 AI 聊天助手 ==================== -->
   <div class="chat-widget">
     <button id="chatToggleBtn" class="chat-fab" type="button" title="AI 故障助手">
@@ -461,6 +491,7 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
 
   <script src="./db.js"></script>
   <script src="./data/faults.js"></script>
+  <script src="./data/circuits.js"></script>
   <script src="./app.js"></script>
 </body>
 </html>

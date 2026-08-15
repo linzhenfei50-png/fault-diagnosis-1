@@ -11,6 +11,8 @@
   const PAGINATE = { history: 12, historyOffset: 0, historyTotal: 0 };
   let pendingImportEntries = [];   // 待确认导入的条目
   let currentPanel = "diagnose";
+  let currentResultItem = null;    // 最近一次诊断结果条目（用于保存到知识库）
+  let currentResultInput = "";     // 最近一次诊断的故障现象文本
 
   /* ================================================================
    *  DOM 引用
@@ -24,7 +26,7 @@
     panels: $$(".panel"),
 
     // 诊断
-    deviceType: $("#deviceType"),
+    circuitFilter: $("#circuitFilter"),
     symptomInput: $("#symptomInput"),
     charCount: $("#charCount"),
     diagnoseButton: $("#diagnoseButton"),
@@ -83,7 +85,7 @@
 
     // 历史面板
     historySearch: $("#historySearch"),
-    historyDeviceFilter: $("#historyDeviceFilter"),
+    historyCircuitFilter: $("#historyCircuitFilter"),
     fullHistoryList: $("#fullHistoryList"),
     historyCount: $("#historyCount"),
     historyPagination: $("#historyPagination"),
@@ -95,6 +97,15 @@
     knowledgeSearch: $("#knowledgeSearch"),
     knowledgeList: $("#knowledgeList"),
     clearImportedBtn: $("#clearImportedBtn"),
+
+    // 保存诊断结果到知识库
+    saveToKbBtn: $("#saveToKbBtn"),
+    saveToKbDialog: $("#saveToKbDialog"),
+    saveKbCircuit: $("#saveKbCircuit"),
+    saveKbExisting: $("#saveKbExisting"),
+    saveKbExistingWrap: $("#saveKbExistingWrap"),
+    saveKbConfirm: $("#saveKbConfirm"),
+    saveKbCancel: $("#saveKbCancel"),
 
     // 导入
     importTabs: $$(".import-tab"),
@@ -112,7 +123,8 @@
     textEntryForm: $("#textEntryForm"),
     textEntrySource: $("#textEntrySource"),
     textEntryId: $("#textEntryId"),
-    textEntryDevice: $("#textEntryDevice"),
+    textEntryCircuit: $("#textEntryCircuit"),
+    textEntryFaultCount: $("#textEntryFaultCount"),
     textEntryTitle: $("#textEntryTitle"),
     textEntrySymptoms: $("#textEntrySymptoms"),
     textEntryKeywords: $("#textEntryKeywords"),
@@ -128,7 +140,8 @@
     imagePreviewGrid: $("#imagePreviewGrid"),
     imageEntryForm: $("#imageEntryForm"),
     imageEntryId: $("#imageEntryId"),
-    imageEntryDevice: $("#imageEntryDevice"),
+    imageEntryCircuit: $("#imageEntryCircuit"),
+    imageEntryFaultCount: $("#imageEntryFaultCount"),
     imageEntryTitle: $("#imageEntryTitle"),
     imageEntryDesc: $("#imageEntryDesc"),
     saveImageEntryBtn: $("#saveImageEntryBtn"),
@@ -207,10 +220,10 @@
   /* ================================================================
    *  DeepSeek API 调用（返回结构化 JSON）
    * ================================================================ */
-  async function callDeepSeekDiagnose(symptom, deviceType, knowledgeContext) {
+  async function callDeepSeekDiagnose(symptom, circuits, knowledgeContext) {
     return window.FaultDB.ai.diagnose({
       symptom,
-      deviceType,
+      circuits,
       knowledgeContext: (knowledgeContext || []).map(k => ({
         title: k.title,
         summary: k.summary,
@@ -279,17 +292,41 @@
   /* ================================================================
    *  诊断引擎
    * ================================================================ */
-  function initializeDeviceTypes() {
-    const types = [...new Set(mergedDatabase.map(item => item.deviceType).filter(Boolean))];
+  function initializeCircuitTypes() {
+    const types = window.CIRCUIT_TYPES || [];
+
+    // 诊断面板：电路类型多选芯片
+    els.circuitFilter.innerHTML = types.map(t => `
+      <label class="circuit-chip">
+        <input type="checkbox" value="${escapeHtml(t)}" data-circuit />
+        <span>${escapeHtml(t)}</span>
+      </label>
+    `).join("");
+
     const opts = types.map(t => `<option value="${escapeHtml(t)}">${escapeHtml(t)}</option>`).join("");
 
-    // 更新诊断面板下拉
-    els.deviceType.querySelectorAll("option:not(:first-child)").forEach(o => o.remove());
-    els.deviceType.insertAdjacentHTML("beforeend", opts);
+    // 历史筛选下拉（保留「全部电路」占位项）
+    if (els.historyCircuitFilter) {
+      els.historyCircuitFilter.querySelectorAll("option:not(:first-child)").forEach(o => o.remove());
+      els.historyCircuitFilter.insertAdjacentHTML("beforeend", opts);
+    }
 
-    // 更新历史面板筛选下拉
-    els.historyDeviceFilter.querySelectorAll("option:not(:first-child)").forEach(o => o.remove());
-    els.historyDeviceFilter.insertAdjacentHTML("beforeend", opts);
+    // 导入表单 / 保存弹窗下拉（无占位，直接重建）
+    [els.textEntryCircuit, els.imageEntryCircuit, els.saveKbCircuit].forEach(select => {
+      if (!select) return;
+      select.innerHTML = opts;
+    });
+  }
+
+  function getSelectedCircuits() {
+    return [...els.circuitFilter.querySelectorAll("input[data-circuit]:checked")].map(i => i.value);
+  }
+
+  function applyCircuitSelection(circuitStr) {
+    const target = String(circuitStr || "").split(/[、，,]/).map(s => s.trim()).filter(Boolean);
+    els.circuitFilter.querySelectorAll("input[data-circuit]").forEach(input => {
+      input.checked = target.includes(input.value);
+    });
   }
 
   let _examplesListenerBound = false;
@@ -314,16 +351,16 @@
     });
   }
 
-  function scoreFault(item, input, selectedType) {
+  function scoreFault(item, input, selectedCircuits) {
     const normalizedInput = normalizeText(input);
-    const typeMatches = selectedType && item.deviceType === selectedType;
-    let score = typeMatches ? 26 : 0;
+    const circuitMatches = Array.isArray(selectedCircuits) && selectedCircuits.length > 0 && selectedCircuits.includes(item.circuit);
+    let score = circuitMatches ? 26 : 0;
     const matchedKeywords = [];
 
     const allKeywords = [
       ...(item.keywords || []),
       ...(item.symptoms || []),
-      item.deviceType,
+      item.circuit,
       item.title
     ].filter(Boolean);
 
@@ -348,7 +385,7 @@
 
   async function diagnose() {
     const input = els.symptomInput.value.trim();
-    const selectedType = els.deviceType.value;
+    const selectedCircuits = getSelectedCircuits();
 
     if (!input) {
       els.symptomInput.focus();
@@ -365,8 +402,8 @@
 
     // ── 先用关键词匹配选出 top3 知识条目作为 AI 上下文 ──
     const scored = mergedDatabase
-      .filter(item => !selectedType || item.deviceType === selectedType)
-      .map(item => scoreFault(item, input, selectedType))
+      .filter(item => !selectedCircuits.length || selectedCircuits.includes(item.circuit))
+      .map(item => scoreFault(item, input, selectedCircuits))
       .sort((a, b) => b.rawScore - a.rawScore);
 
     // ── 显示加载态 ──
@@ -382,7 +419,7 @@
     if (aiReady) {
       try {
         const top3 = scored.slice(0, 3).map(s => s.item);
-        aiResult = await callDeepSeekDiagnose(input, selectedType, top3);
+        aiResult = await callDeepSeekDiagnose(input, selectedCircuits, top3);
       } catch (err) {
         console.warn("[app] AI 诊断失败:", err);
       }
@@ -400,7 +437,7 @@
       renderResult(best.item, displayScore, best.matchedKeywords, input, false);
       saveHistory(input, best.item, displayScore, best.matchedKeywords);
     } else {
-      showNoMatch("当前设备类型下没有可用诊断数据。请在 data/faults.js 中新增或通过导入功能添加知识条目。");
+      showNoMatch("当前电路类型下没有可用诊断数据。请通过导入功能添加知识条目，或取消电路筛选后重试。");
       return;
     }
 
@@ -426,6 +463,10 @@
     els.emptyState.classList.add("hidden");
     els.resultSection.classList.remove("hidden");
 
+    // 暂存当前结果，供「保存到知识库」使用
+    currentResultItem = item;
+    currentResultInput = input;
+
     /* ---- 报告头部 ---- */
     els.resultTitle.textContent = item.title;
     els.resultSummary.textContent = item.summary;
@@ -450,7 +491,7 @@
 
     /* ---- 步骤1：故障识别 ---- */
     els.identifySymptom.textContent = input;
-    els.identifyDevice.textContent = item.deviceType || "未指定";
+    els.identifyDevice.textContent = item.circuit || "未指定";
     if (isAI && item.databaseNote) {
       els.identifyDbStatus.textContent = item.databaseMatch ? "✅ 数据库中已存在此故障类型" : "⚠️ 数据库中未记录此故障";
       els.identifyDbNote.className = item.databaseMatch ? "step-note match-found" : "step-note match-new";
@@ -556,7 +597,7 @@
     try {
       await window.FaultDB.history.save({
         input,
-        deviceType: item.deviceType || "",
+        circuit: item.circuit || "",
         faultId: item.id,
         title: item.title,
         severity: item.severity || "",
@@ -603,7 +644,7 @@
       }
 
       if (deviceFilter) {
-        records = records.filter(r => r.deviceType === deviceFilter);
+        records = records.filter(r => (r.circuit || r.deviceType) === deviceFilter);
       }
 
       els.historyCount.textContent = searchQuery
@@ -625,7 +666,7 @@
             </div>
             <p class="fhi-title">${escapeHtml(record.title)}</p>
             <div class="fhi-meta">
-              <span>设备：${escapeHtml(record.deviceType || "—")}</span>
+              <span>电路：${escapeHtml(record.circuit || record.deviceType || "—")}</span>
               <span>匹配度：${record.score || 0}%</span>
               <span>${formatDate(record.createdAt)}</span>
             </div>
@@ -674,31 +715,51 @@
       if (filterText) {
         const q = filterText.toLowerCase();
         list = list.filter(e =>
-          e.title.toLowerCase().includes(q) ||
-          e.deviceType.toLowerCase().includes(q) ||
-          (e.keywords || []).some(k => k.toLowerCase().includes(q))
+          (e.title || "").toLowerCase().includes(q) ||
+          (e.circuit || e.deviceType || "").toLowerCase().includes(q) ||
+          (e.keywords || []).some(k => (k || "").toLowerCase().includes(q))
         );
       }
 
       const isImported = (id) => imported.some(e => e.id === id);
 
-      els.knowledgeList.innerHTML = list.map(entry => `
-        <div class="knowledge-card ${isImported(entry.id) ? "imported" : "built-in"}">
-          <div class="kn-header">
-            <strong>${escapeHtml(entry.title)}</strong>
-            <span class="kn-badge ${isImported(entry.id) ? "kn-imported" : "kn-builtin"}">
-              ${isImported(entry.id) ? "导入" : "内置"}
-            </span>
+      // 按电路分组
+      const groups = new Map();
+      list.forEach(entry => {
+        const circuit = entry.circuit || entry.deviceType || "未分类";
+        if (!groups.has(circuit)) groups.set(circuit, []);
+        groups.get(circuit).push(entry);
+      });
+
+      els.knowledgeList.innerHTML = [...groups.entries()].map(([circuit, entries]) => {
+        const totalCount = entries.reduce((sum, e) => sum + (Number(e.faultCount) || 1), 0);
+        return `
+        <div class="kn-group">
+          <div class="kn-group-header">
+            <span>🔌 ${escapeHtml(circuit)}</span>
+            <span class="kn-group-stat">共 ${entries.length} 条 · 累计故障 ${totalCount} 次</span>
           </div>
-          <div class="kn-meta">
-            <span>设备：${escapeHtml(entry.deviceType)}</span>
-            <span>等级：${escapeHtml(entry.severity || "—")}</span>
-            <span>关键词：${(entry.keywords || []).slice(0, 4).join("、")}</span>
-          </div>
-          <p class="kn-summary">${escapeHtml(entry.summary || "")}</p>
-          ${isImported(entry.id) ? `<button class="text-button kn-delete" data-kn-id="${escapeHtml(entry.id)}" style="color:var(--danger); font-size:12px;">删除此条</button>` : ""}
-        </div>
-      `).join("") || `<p class="history-empty">暂无匹配的知识条目。</p>`;
+          ${entries.map(entry => `
+            <div class="knowledge-card ${isImported(entry.id) ? "imported" : "built-in"}">
+              <div class="kn-header">
+                <strong>${escapeHtml(entry.title)}</strong>
+                <div class="kn-header-right">
+                  <span class="fault-count-badge">故障 ×${Number(entry.faultCount) || 1}</span>
+                  <span class="kn-badge ${isImported(entry.id) ? "kn-imported" : "kn-builtin"}">
+                    ${isImported(entry.id) ? "导入" : "内置"}
+                  </span>
+                </div>
+              </div>
+              <div class="kn-meta">
+                <span>等级：${escapeHtml(entry.severity || "—")}</span>
+                <span>关键词：${(entry.keywords || []).slice(0, 4).join("、") || "—"}</span>
+              </div>
+              <p class="kn-summary">${escapeHtml(entry.summary || "")}</p>
+              ${isImported(entry.id) ? `<button class="text-button kn-delete" data-kn-id="${escapeHtml(entry.id)}" style="color:var(--danger); font-size:12px;">删除此条</button>` : ""}
+            </div>
+          `).join("")}
+        </div>`;
+      }).join("") || `<p class="history-empty">暂无匹配的知识条目。</p>`;
     } catch (e) {
       els.knowledgeList.innerHTML = `<p class="history-empty">读取知识库失败。</p>`;
     }
@@ -710,15 +771,14 @@
   function validateFaultEntry(obj) {
     if (!obj || typeof obj !== "object") return { valid: false, reason: "不是有效对象" };
     if (!obj.id || !obj.title) return { valid: false, reason: `缺少 id 或 title 字段` };
-    if (!Array.isArray(obj.keywords)) return { valid: false, reason: `"${obj.id}": keywords 必须是数组` };
     return {
       valid: true,
       entry: {
         id: obj.id,
-        deviceType: obj.deviceType || "通用",
+        circuit: obj.circuit || obj.deviceType || "通用",
         title: obj.title,
         symptoms: Array.isArray(obj.symptoms) ? obj.symptoms : [],
-        keywords: obj.keywords,
+        keywords: Array.isArray(obj.keywords) ? obj.keywords : [],
         summary: obj.summary || "",
         severity: obj.severity || "中",
         shutdownRequired: Boolean(obj.shutdownRequired),
@@ -726,7 +786,8 @@
         causes: Array.isArray(obj.causes) ? obj.causes : [],
         solutions: Array.isArray(obj.solutions) ? obj.solutions : [],
         diagram: Array.isArray(obj.diagram) ? obj.diagram : [],
-        safety: obj.safety || ""
+        safety: obj.safety || "",
+        faultCount: Math.max(1, parseInt(obj.faultCount) || 1)
       }
     };
   }
@@ -843,7 +904,7 @@
 
       // 刷新数据
       await loadImportedData();
-      initializeDeviceTypes();
+      initializeCircuitTypes();
       initializeExamples();
       resetDataStatus();
 
@@ -1217,7 +1278,7 @@
       if (!record) return;
       els.symptomInput.value = record.input;
       els.charCount.textContent = String(record.input.length);
-      if (record.deviceType) els.deviceType.value = record.deviceType;
+      if (record.circuit || record.deviceType) applyCircuitSelection(record.circuit || record.deviceType);
       const item = mergedDatabase.find(e => e.id === record.faultId);
       if (item) {
         const fromAI = record.faultId && record.faultId.startsWith("ai-");
@@ -1242,16 +1303,16 @@
     PAGINATE.historyOffset = 0;
     await renderFullHistory(
       els.historySearch.value.trim(),
-      els.historyDeviceFilter.value
+      els.historyCircuitFilter.value
     );
   }, 300));
 
-  // 全历史面板 - 设备筛选
-  els.historyDeviceFilter.addEventListener("change", async () => {
+  // 全历史面板 - 电路筛选
+  els.historyCircuitFilter.addEventListener("change", async () => {
     PAGINATE.historyOffset = 0;
     await renderFullHistory(
       els.historySearch.value.trim(),
-      els.historyDeviceFilter.value
+      els.historyCircuitFilter.value
     );
   });
 
@@ -1269,7 +1330,7 @@
     }
     await renderFullHistory(
       els.historySearch.value.trim(),
-      els.historyDeviceFilter.value
+      els.historyCircuitFilter.value
     );
   });
 
@@ -1287,7 +1348,7 @@
         switchPanel("diagnose");
         els.symptomInput.value = record.input;
         els.charCount.textContent = String(record.input.length);
-        if (record.deviceType) els.deviceType.value = record.deviceType;
+        if (record.circuit || record.deviceType) applyCircuitSelection(record.circuit || record.deviceType);
         const item = mergedDatabase.find(e => e.id === record.faultId);
         if (item) {
           const fromAI = record.faultId && record.faultId.startsWith("ai-");
@@ -1304,7 +1365,7 @@
         await window.FaultDB.history.remove(id);
         await renderFullHistory(
           els.historySearch.value.trim(),
-          els.historyDeviceFilter.value
+          els.historyCircuitFilter.value
         );
         await renderRecentHistory();
       }
@@ -1336,7 +1397,7 @@
     if (confirm(`确定删除导入的知识条目 "${id}"？`)) {
       await window.FaultDB.faultData.remove(id);
       await loadImportedData();
-      initializeDeviceTypes();
+      initializeCircuitTypes();
       initializeExamples();
       resetDataStatus();
       await renderKnowledgeList(els.knowledgeSearch.value.trim());
@@ -1349,7 +1410,7 @@
       await window.FaultDB.faultData.clearAll();
       await window.FaultDB.files.clearAll();
       await loadImportedData();
-      initializeDeviceTypes();
+      initializeCircuitTypes();
       initializeExamples();
       resetDataStatus();
       await renderKnowledgeList(els.knowledgeSearch.value.trim());
@@ -1391,7 +1452,8 @@
   /** 填充文本条目表单 */
   function fillTextEntryForm(data) {
     els.textEntryId.value = data.id || "entry-" + Date.now();
-    els.textEntryDevice.value = data.deviceType || "";
+    els.textEntryCircuit.value = data.circuit || data.deviceType || (window.CIRCUIT_TYPES?.[0] || "");
+    els.textEntryFaultCount.value = data.faultCount || 1;
     els.textEntryTitle.value = data.title || "";
     els.textEntrySymptoms.value = (data.symptoms || []).join("；") || "";
     els.textEntryKeywords.value = (data.keywords || []).join("，");
@@ -1404,7 +1466,7 @@
   function collectTextEntry() {
     return {
       id: els.textEntryId.value.trim(),
-      deviceType: els.textEntryDevice.value.trim() || "通用",
+      circuit: els.textEntryCircuit.value.trim() || "通用",
       title: els.textEntryTitle.value.trim(),
       symptoms: els.textEntrySymptoms.value.trim().split(/[；;，,、]/).map(s => s.trim()).filter(Boolean),
       keywords: els.textEntryKeywords.value.trim().split(/[，,、]/).map(s => s.trim()).filter(Boolean),
@@ -1415,7 +1477,8 @@
       causes: [],
       solutions: [],
       diagram: [],
-      safety: ""
+      safety: "",
+      faultCount: Math.max(1, parseInt(els.textEntryFaultCount.value) || 1)
     };
   }
 
@@ -1451,7 +1514,7 @@
     const text = els.textImportInput.value.trim();
     fillTextEntryForm({
       id: "entry-" + Date.now(),
-      deviceType: "",
+      circuit: "",
       title: "",
       symptoms: text ? [text] : [],
       keywords: [],
@@ -1477,7 +1540,7 @@
       await window.FaultDB.faultData.saveAll([entry]);
       await window.FaultDB.files.mark(entry.id + " (文字输入)");
       await loadImportedData();
-      initializeDeviceTypes();
+      initializeCircuitTypes();
       initializeExamples();
       resetDataStatus();
 
@@ -1491,9 +1554,10 @@
 
       // 重置表单
       els.textEntryForm.classList.add("hidden");
-      els.textEntryId.value = ""; els.textEntryDevice.value = "";
+      els.textEntryId.value = "";
       els.textEntryTitle.value = ""; els.textEntrySymptoms.value = "";
       els.textEntryKeywords.value = ""; els.textEntrySummary.value = "";
+      els.textEntryFaultCount.value = "1";
       renderImportedFiles();
     } catch (e) {
       alert("保存失败：" + e.message);
@@ -1580,10 +1644,10 @@
 
     const entry = {
       id,
-      deviceType: els.imageEntryDevice.value.trim() || "通用",
+      circuit: els.imageEntryCircuit.value.trim() || "通用",
       title,
       symptoms: [els.imageEntryDesc.value.trim() || title],
-      keywords: [title, els.imageEntryDevice.value.trim()].filter(Boolean),
+      keywords: [],
       summary: els.imageEntryDesc.value.trim() || title,
       severity: "中",
       shutdownRequired: false,
@@ -1592,6 +1656,7 @@
       solutions: [],
       diagram: [],
       safety: "",
+      faultCount: Math.max(1, parseInt(els.imageEntryFaultCount.value) || 1),
       // 附加图片数据
       _images: pendingImages.map(img => ({ name: img.name, dataUrl: img.dataUrl }))
     };
@@ -1600,7 +1665,7 @@
       await window.FaultDB.faultData.saveAll([entry]);
       await window.FaultDB.files.mark(id + " (图片导入)");
       await loadImportedData();
-      initializeDeviceTypes();
+      initializeCircuitTypes();
       initializeExamples();
       resetDataStatus();
 
@@ -1617,9 +1682,9 @@
       els.imagePreviewGrid.innerHTML = "";
       els.imageEntryForm.classList.add("hidden");
       els.imageEntryId.value = "";
-      els.imageEntryDevice.value = "";
       els.imageEntryTitle.value = "";
       els.imageEntryDesc.value = "";
+      els.imageEntryFaultCount.value = "1";
       renderImportedFiles();
     } catch (e) {
       alert("保存失败：" + e.message);
@@ -1711,7 +1776,7 @@
       .slice(0, 3)
       .map(s => ({
         title: s.item.title,
-        deviceType: s.item.deviceType,
+        circuit: s.item.circuit,
         summary: s.item.summary,
         causes: (s.item.causes || []).map(c => c && c.name).filter(Boolean),
         solutions: (s.item.solutions || []).map(x => x && x.action).filter(Boolean),
@@ -1788,6 +1853,86 @@
   });
 
   /* ================================================================
+   *  保存诊断结果到知识库
+   * ================================================================ */
+  function circuitOf(entry) {
+    return entry?.circuit || entry?.deviceType || "未分类";
+  }
+
+  function refreshSaveKbExisting() {
+    const circuit = els.saveKbCircuit.value;
+    const options = mergedDatabase.filter(e => circuitOf(e) === circuit);
+    els.saveKbExisting.innerHTML = options.length
+      ? options.map(e => `<option value="${escapeHtml(e.id)}">${escapeHtml(e.title)}（故障 ×${Number(e.faultCount) || 1}）</option>`).join("")
+      : `<option value="">该电路下暂无已有故障</option>`;
+
+    const mode = (els.saveToKbDialog.querySelector("input[name=saveKbMode]:checked") || {}).value;
+    els.saveKbExistingWrap.classList.toggle("hidden", mode !== "existing");
+  }
+
+  function openSaveToKbDialog() {
+    if (!currentResultItem) { alert("请先完成一次诊断"); return; }
+    const defaultCircuit = circuitOf(currentResultItem);
+    if ([...els.saveKbCircuit.options].some(o => o.value === defaultCircuit)) {
+      els.saveKbCircuit.value = defaultCircuit;
+    }
+    refreshSaveKbExisting();
+    els.saveToKbDialog.showModal();
+  }
+
+  els.saveToKbBtn.addEventListener("click", openSaveToKbDialog);
+  els.saveKbCircuit.addEventListener("change", refreshSaveKbExisting);
+  els.saveToKbDialog.querySelectorAll("input[name=saveKbMode]").forEach(radio => {
+    radio.addEventListener("change", refreshSaveKbExisting);
+  });
+  els.saveKbCancel.addEventListener("click", () => els.saveToKbDialog.close());
+  els.saveKbConfirm.addEventListener("click", async () => {
+    const mode = (els.saveToKbDialog.querySelector("input[name=saveKbMode]:checked") || {}).value;
+    const circuit = els.saveKbCircuit.value;
+
+    try {
+      if (mode === "existing") {
+        const targetId = els.saveKbExisting.value;
+        if (!targetId) { alert("该电路下暂无已有故障可累加，请选择「新建知识条目」"); return; }
+        const existing = mergedDatabase.find(e => e.id === targetId);
+        if (!existing) { alert("未找到目标故障条目"); return; }
+        const updated = { ...existing, faultCount: (Number(existing.faultCount) || 1) + 1 };
+        await window.FaultDB.faultData.saveAll([updated]);
+      } else {
+        const newEntry = {
+          id: "kb-" + Date.now(),
+          circuit,
+          title: currentResultItem.title || "诊断结果",
+          symptoms: [currentResultInput],
+          keywords: [],
+          summary: currentResultItem.summary || "",
+          severity: currentResultItem.severity || "中",
+          shutdownRequired: Boolean(currentResultItem.shutdownRequired),
+          estimatedTime: currentResultItem.estimatedTime || "",
+          causes: currentResultItem.causes || [],
+          solutions: (currentResultItem.solutions && currentResultItem.solutions.length)
+            ? currentResultItem.solutions
+            : ((currentResultItem.guidance?.steps || []).map(s => ({ action: s, detail: "", tools: [], duration: "" }))),
+          diagram: [],
+          safety: currentResultItem.safety || "",
+          faultCount: 1,
+        };
+        await window.FaultDB.faultData.saveAll([newEntry]);
+      }
+
+      await loadImportedData();
+      initializeCircuitTypes();
+      initializeExamples();
+      resetDataStatus();
+      els.saveToKbDialog.close();
+      alert("✅ 已保存到知识库");
+      await renderKnowledgeList(els.knowledgeSearch.value.trim());
+    } catch (e) {
+      alert("保存失败：" + e.message);
+    }
+  });
+
+  /* ================================================================
    *  启动
    * ================================================================ */
   function resetDataStatus() {
@@ -1803,12 +1948,14 @@
     // 初始化 AI 状态（从后端读取）
     await loadAIStatus();
 
+    // 电路类型清单是固定清单，始终渲染（与知识库数据无关）
+    initializeCircuitTypes();
+
     if (!mergedDatabase.length) {
       els.dataStatus.textContent = "未读取到故障数据";
       els.dataStatus.style.color = "#e34b4b";
       els.dataStatus.style.background = "#fff0f0";
     } else {
-      initializeDeviceTypes();
       initializeExamples();
       resetDataStatus();
     }

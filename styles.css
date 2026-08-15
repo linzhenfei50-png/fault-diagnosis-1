@@ -297,6 +297,36 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   background: var(--primary-soft);
 }
 
+/* 电路类型多选芯片 */
+.circuit-filter {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+.circuit-chip {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  padding: 5px 12px;
+  border: 1px solid var(--border);
+  border-radius: 99px;
+  font-size: 12px;
+  color: var(--text-secondary);
+  background: #fafbfc;
+  cursor: pointer;
+  transition: .15s ease;
+  user-select: none;
+}
+.circuit-chip input[type="checkbox"] {
+  accent-color: var(--primary);
+  cursor: pointer;
+}
+.circuit-chip:has(input:checked) {
+  color: var(--primary);
+  border-color: #bbc8f0;
+  background: var(--primary-soft);
+}
+
 /* ================================================================
    Buttons
    ================================================================ */
@@ -882,6 +912,7 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 
 .kn-header { display: flex; justify-content: space-between; align-items: center; gap: 10px; }
 .kn-header strong { font-size: 14px; font-weight: 600; }
+.kn-header-right { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
 
 .kn-badge {
   padding: 2px 8px;
@@ -899,6 +930,41 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 }
 .kn-summary { margin-top: 4px; font-size: 13px; color: var(--text-secondary); line-height: 1.55; }
 .kn-delete { margin-top: 6px; font-size: 12px; display: inline-block; }
+
+/* 知识库按电路分组 */
+.kn-group { display: grid; gap: 8px; }
+.kn-group + .kn-group { margin-top: 16px; }
+.kn-group-header {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 8px 12px;
+  border-radius: var(--radius-sm);
+  background: #f2f4f9;
+  font-size: 13px;
+  font-weight: 600;
+  color: var(--text);
+}
+.kn-group-header .kn-group-stat {
+  margin-left: auto;
+  font-size: 12px;
+  font-weight: 500;
+  color: var(--text-tertiary);
+}
+
+/* 故障数量徽标（突出显示） */
+.fault-count-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 3px;
+  padding: 2px 9px;
+  border-radius: 99px;
+  font-size: 11px;
+  font-weight: 700;
+  color: #fff;
+  background: var(--warning);
+  flex-shrink: 0;
+}
 
 /* ================================================================
    Import Panel
@@ -1174,6 +1240,17 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
 }
 .modal-header h2 { font-size: 17px; font-weight: 600; margin: 0; }
 .modal-content { padding: 20px 22px; display: grid; gap: 14px; }
+
+.save-kb-mode {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: 13px;
+  font-weight: 500;
+  color: var(--text-secondary);
+  cursor: pointer;
+}
+.save-kb-mode input[type="radio"] { accent-color: var(--primary); cursor: pointer; }
 
 /* ================================================================
    AI Status & Settings
