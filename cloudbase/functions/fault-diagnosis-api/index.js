@@ -36,14 +36,22 @@ function error(message, status = 400) {
   return json({ error: message }, status);
 }
 
-function corsHeaders() {
-  const origin = process.env.ALLOWED_ORIGIN || '*';
-  return {
-    'Access-Control-Allow-Origin': origin,
+function corsHeaders(req) {
+  const headers = {
     'Access-Control-Allow-Methods': 'GET, POST, DELETE, OPTIONS',
     'Access-Control-Allow-Headers': 'Content-Type',
-    'Access-Control-Max-Age': '86400',
   };
+  // 网关 tcbgw 会对 loopback 来源（localhost/127.0.0.1）自动回显 Origin 并追加
+  // Access-Control-Allow-Credentials。若函数也写 Allow-Origin，会拼成 "origin,*"
+  // 多值头被浏览器拒绝。因此 loopback 交给网关处理；其它来源（GitHub Pages、file://）
+  // 网关不会回显，需函数显式给出 Allow-Origin。
+  const origin = req && req.headers && req.headers.origin;
+  const isLoopback = typeof origin === 'string' && /^https?:\/\/(localhost|127\.0\.0\.1)(:\d+)?$/i.test(origin);
+  if (!isLoopback) {
+    headers['Access-Control-Allow-Origin'] = process.env.ALLOWED_ORIGIN || '*';
+    headers['Access-Control-Max-Age'] = '86400';
+  }
+  return headers;
 }
 
 /** 去掉路径里可能被 HTTP 访问服务加上的前缀，统一成叶子路径 */
@@ -640,7 +648,7 @@ const server = http.createServer(async (req, res) => {
   const method = (req.method || 'GET').toUpperCase();
   const path = normalizePath(req.url);
   const query = parseQuery(req.url);
-  const cors = corsHeaders();
+  const cors = corsHeaders(req);
 
   console.log(`[cloudbase] ${method} ${path}`);
 
