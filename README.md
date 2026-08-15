@@ -7,13 +7,13 @@
 ```
 浏览器 (GitHub Pages)
   │
-  ├──→ 诊断请求 ──→ DeepSeek API（直连，Key 硬编码在前端）
+  ├──→ 诊断请求 ──→ CloudBase 云函数 ──→ DeepSeek API（Key 存后端，不经过浏览器）
   │
   └──→ 数据 CRUD ──→ CloudBase 云函数 ──→ NoSQL 文档库
        知识库/历史         (Web 函数)         云端数据库
 ```
 
-- **AI 调用**：前端直接调用 DeepSeek，不使用后端代理
+- **AI 调用**：前端调用云函数 `/ai/*` 代理端点，DeepSeek Key 存在云函数环境变量，不经过浏览器
 - **数据存储**：通过云函数 REST API 读写 CloudBase NoSQL 数据库，替代浏览器 IndexedDB
 
 ## 目录结构
@@ -92,10 +92,9 @@ tcb fn deploy fault-diagnosis-api --httpFn --force
 
 ## API Key 说明
 
-- **默认 Key**：硬编码在 `app.js` 的 `DEFAULT_AI_CONFIG.apiKey` 中，所有用户共享
-- **个人 Key**：用户可在界面 ⚙ 设置中更换为自己的 Key（保存在浏览器 localStorage）
-- **显示保护**：界面上只显示 `••••xxxx`（后四位），但在浏览器 F12 源码中可看到完整 Key
-- **安全建议**：如果对安全性要求较高，可将云函数改造为 AI 代理（添加 `/api/diagnose` 端点，Key 存在云函数环境变量中）
+- **Key 位置**：DeepSeek Key 存在云函数环境变量 `DEEPSEEK_API_KEY`（后端代理），不经过浏览器、不提交到 git
+- **显示保护**：界面「⚙ AI 设置」里只显示 `••••xxxx`（后四位），无法查看或更改
+- **重新部署**：重新部署后端前，把真实 Key 填回 `cloudbaserc.json` 的 `envVariables.DEEPSEEK_API_KEY`（本地 `.env` 存了一份），部署后删除；或直接在控制台设置函数环境变量
 
 ## 后续维护
 

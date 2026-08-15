@@ -70,12 +70,6 @@
     apiSettings: $("#apiSettings"),
     closeApiSettings: $("#closeApiSettings"),
     apiKeyStatus: $("#apiKeyStatus"),
-    apiKeyInput: $("#apiKeyInput"),
-    changeApiKeyBtn: $("#changeApiKeyBtn"),
-    apiKeyActions: $("#apiKeyActions"),
-    saveApiKeyBtn: $("#saveApiKeyBtn"),
-    cancelApiKeyBtn: $("#cancelApiKeyBtn"),
-    clearApiKeyBtn: $("#clearApiKeyBtn"),
     testApiBtn: $("#testApiBtn"),
 
     // 历史面板
@@ -172,43 +166,32 @@
   }
 
   /* ================================================================
-   *  AI 配置管理
+   *  AI 状态（Key 由后端云函数代理，前端不持有完整 Key）
    * ================================================================ */
-  const DEEPSEEK_API = "https://api.deepseek.com/v1/chat/completions";
-  const DEEPSEEK_MODEL = "deepseek-chat";
-  const AI_CONFIG_KEY = "fault-diagnosis-ai-config-v1";
+  let aiReady = false;
+  let aiKeyMasked = "";
 
-  const DEFAULT_AI_CONFIG = {
-    // 🔑 共享的 DeepSeek API Key：所有打开网页的人都会使用此 Key（已硬编码在前端）
-    //    界面上只显示后四位（••••xxxx），但注意：浏览器 F12 源码中能看到完整 Key。
-    //    如需更安全，应改为后端代理方案（把 Key 存到云函数环境变量，前端只调云函数）。
-    apiKey: "sk-ec5cc2ce10cc4405bf5ddf4ed4bffbe5",
-    model: DEEPSEEK_MODEL,
-    enabled: true
-  };
-
-  function getAIConfig() {
+  async function loadAIStatus() {
     try {
-      const saved = JSON.parse(localStorage.getItem(AI_CONFIG_KEY));
-      if (saved && typeof saved.apiKey === "string" && saved.apiKey.startsWith("sk-")) {
-        return { ...DEFAULT_AI_CONFIG, ...saved };
-      }
-    } catch { /* ignore */ }
-    return { ...DEFAULT_AI_CONFIG };
-  }
-
-  function saveAIConfig(config) {
-    localStorage.setItem(AI_CONFIG_KEY, JSON.stringify(config));
+      const s = await window.FaultDB.ai.status();
+      aiReady = !!s.configured;
+      aiKeyMasked = s.keyMasked || "";
+    } catch (e) {
+      aiReady = false;
+      aiKeyMasked = "";
+      console.warn("[app] 读取 AI 状态失败:", e);
+    }
+    updateAIStatus();
+    refreshApiKeyUI();
   }
 
   function updateAIStatus() {
-    const config = getAIConfig();
-    if (!config.apiKey || !config.apiKey.startsWith("sk-")) {
-      els.aiStatus.textContent = "🤖 AI 未配置";
-      els.aiStatus.className = "ai-status off";
-    } else {
+    if (aiReady) {
       els.aiStatus.textContent = "🤖 AI 就绪";
       els.aiStatus.className = "ai-status on";
+    } else {
+      els.aiStatus.textContent = "🤖 AI 未配置";
+      els.aiStatus.className = "ai-status off";
     }
   }
 
@@ -216,116 +199,16 @@
    *  DeepSeek API 调用（返回结构化 JSON）
    * ================================================================ */
   async function callDeepSeekDiagnose(symptom, deviceType, knowledgeContext) {
-    const config = getAIConfig();
-    if (!config.apiKey || !config.apiKey.startsWith("sk-")) {
-      throw new Error("API Key 未配置");
-    }
-
-    const deviceInfo = deviceType ? `设备类型：${deviceType}` : "设备类型：未指定";
-    const knowledgeText = knowledgeContext.length
-      ? `\n【参考知识库】\n${knowledgeContext.map((k, i) => `${i + 1}. ${k.title}：${k.summary}\n   可能原因：${(k.causes || []).map(c => c.name).join("、")}\n   解决措施：${(k.solutions || []).map(s => s.action).join("、")}`).join("\n")}`
-      : "";
-
-    const systemPrompt = `你是一名资深的工业设备故障诊断专家，拥有20年现场运维经验。
-
-请根据故障现象和参考知识库，采用"排除法"进行诊断推理，返回严格的 JSON：
-
-{
-  "title": "诊断标题",
-  "summary": "诊断摘要（80-150字）",
-  "severity": "高/中/低",
-  "shutdownRequired": true或false,
-  "estimatedTime": "预计处理时间",
-  "databaseMatch": true或false（此故障类型在参考知识库中是否有匹配条目）,
-  "databaseNote": "如果匹配：说明匹配到了什么；如果未匹配：说明这是新故障类型。20-40字",
-
-  "causes": [
-    { "name": "原因名称", "probability": 40, "evidence": "判断依据一句话" }
-  ],
-
-  "eliminations": [
-    { "cause": "被排除的原因", "ruledOut": true, "reason": "排除依据", "evidence": "相关证据" },
-    { "cause": "被确认的原因", "ruledOut": false, "reason": "确认依据", "evidence": "相关证据" }
-  ],
-
-  "rootCauses": [
-    { "scenario": "具体故障场景描述", "detail": "详细的故障机理说明，讲清楚为什么会发生", "probability": 60 }
-  ],
-
-  "guidance": {
-    "steps": ["排查步骤1", "排查步骤2", "排查步骤3"],
-    "tools": ["所需工具"],
-    "prevention": "预防再发生的建议"
-  },
-
-  "safety": "安全提示"
-}
-
-规则：
-- causes 列出3-5个可能原因，probability 总和100
-- eliminations 至少包含2个被排除项和1个确认项，体现排除推理过程
-- rootCauses 给出1-3个最可能的根因，具体描述故障场景
-- guidance.steps 给出3-5个可操作的排查/整改步骤
-- 必须返回严格合法的 JSON，不要有注释或额外说明`;
-
-    const userMessage = `${deviceInfo}\n【故障现象】${symptom}${knowledgeText}\n\n请按照系统提示的 JSON 格式返回诊断结果，采用排除法进行推理分析。只返回 JSON，不要包含 markdown 代码块标记。`;
-
-    const response = await fetch(DEEPSEEK_API, {
-      method: "POST",
-      headers: {
-        "Content-Type": "application/json",
-        "Authorization": `Bearer ${config.apiKey}`
-      },
-      body: JSON.stringify({
-        model: config.model || DEEPSEEK_MODEL,
-        messages: [
-          { role: "system", content: systemPrompt },
-          { role: "user", content: userMessage }
-        ],
-        temperature: 0.3,
-        max_tokens: 2048,
-        top_p: 0.9
-      })
+    return window.FaultDB.ai.diagnose({
+      symptom,
+      deviceType,
+      knowledgeContext: (knowledgeContext || []).map(k => ({
+        title: k.title,
+        summary: k.summary,
+        causes: (k.causes || []).map(c => c && c.name).filter(Boolean),
+        solutions: (k.solutions || []).map(s => s && s.action).filter(Boolean),
+      })),
     });
-
-    if (!response.ok) {
-      const err = await response.json().catch(() => ({}));
-      const msg = err.error?.message || `HTTP ${response.status}`;
-      if (response.status === 401) throw new Error("API Key 无效，请检查设置");
-      if (response.status === 402) throw new Error("API 余额不足，请充值");
-      if (response.status === 429) throw new Error("请求过于频繁，请稍后再试");
-      throw new Error(`API 错误：${msg}`);
-    }
-
-    const data = await response.json();
-    let content = data.choices?.[0]?.message?.content;
-    if (!content) throw new Error("AI 返回内容为空，请重试");
-
-    // 尝试从可能的 markdown 代码块中提取 JSON
-    const jsonMatch = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-    if (jsonMatch) content = jsonMatch[1];
-    content = content.trim();
-
-    const result = JSON.parse(content);
-    return {
-      id: "ai-" + Date.now(),
-      deviceType: deviceType || "通用",
-      title: result.title || "故障诊断结果",
-      symptoms: [symptom],
-      keywords: result.causes?.map(c => c.name) || [],
-      summary: result.summary || "",
-      severity: result.severity || "中",
-      shutdownRequired: Boolean(result.shutdownRequired),
-      estimatedTime: result.estimatedTime || "",
-      databaseMatch: Boolean(result.databaseMatch),
-      databaseNote: result.databaseNote || "",
-      causes: Array.isArray(result.causes) ? result.causes : [],
-      eliminations: Array.isArray(result.eliminations) ? result.eliminations : [],
-      rootCauses: Array.isArray(result.rootCauses) ? result.rootCauses : [],
-      guidance: result.guidance || { steps: [], tools: [], prevention: "" },
-      safety: result.safety || "",
-      matchScore: result.matchScore || 85,
-    };
   }
 
   /* ================================================================
@@ -485,16 +368,13 @@
     els.emptyDesc.textContent = "正在调用 DeepSeek 大模型，结合知识库进行智能故障诊断，请稍候。";
     setDiagnoseLoading(true);
 
-    const config = getAIConfig();
     let aiResult = null;
-    let aiError = null;
 
-    if (config.apiKey && config.apiKey.startsWith("sk-")) {
+    if (aiReady) {
       try {
         const top3 = scored.slice(0, 3).map(s => s.item);
         aiResult = await callDeepSeekDiagnose(input, selectedType, top3);
       } catch (err) {
-        aiError = err.message;
         console.warn("[app] AI 诊断失败:", err);
       }
     }
@@ -1535,9 +1415,8 @@
     const text = els.textImportInput.value.trim();
     if (!text) { alert("请先输入故障描述文本"); return; }
 
-    const config = getAIConfig();
-    if (!config.apiKey || !config.apiKey.startsWith("sk-")) {
-      alert("请先在顶部 ⚙ 设置中配置 DeepSeek API Key，才能使用 AI 解析功能。");
+    if (!aiReady) {
+      alert("AI 服务未就绪，请确认后端已配置 DeepSeek API Key。");
       return;
     }
 
@@ -1545,54 +1424,7 @@
     els.aiParseTextBtn.disabled = true;
 
     try {
-      const response = await fetch(DEEPSEEK_API, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          "Authorization": `Bearer ${config.apiKey}`
-        },
-        body: JSON.stringify({
-          model: DEEPSEEK_MODEL,
-          messages: [
-            {
-              role: "system",
-              content: `你是一个工业设备故障数据录入助手。从用户输入的故障描述文本中提取关键信息，返回严格 JSON：
-
-{
-  "id": "唯一英文ID，如 rs485-resistor-burn",
-  "deviceType": "设备类型，如 通讯电路板",
-  "title": "故障标题，20字以内",
-  "symptoms": ["故障现象1", "故障现象2"],
-  "keywords": ["关键词1", "关键词2"],
-  "summary": "诊断摘要，80-150字",
-  "severity": "高/中/低",
-  "shutdownRequired": true或false,
-  "causes": [{"name": "原因", "probability": 40, "evidence": "依据"}],
-  "solutions": [{"action": "措施", "detail": "说明", "tools": ["工具"], "duration": "耗时"}],
-  "diagram": [{"title": "步骤", "description": "说明"}],
-  "safety": "安全提示"
-}
-
-只返回JSON，不要markdown标记。`
-            },
-            { role: "user", content: text }
-          ],
-          temperature: 0.2,
-          max_tokens: 2048
-        })
-      });
-
-      if (!response.ok) {
-        const err = await response.json().catch(() => ({}));
-        throw new Error(err.error?.message || "HTTP " + response.status);
-      }
-
-      const data = await response.json();
-      let content = data.choices?.[0]?.message?.content || "";
-      // 提取 JSON
-      const m = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
-      if (m) content = m[1];
-      const parsed = JSON.parse(content.trim());
+      const parsed = await window.FaultDB.ai.parse(text);
 
       fillTextEntryForm(parsed);
       els.textEntrySource.textContent = "🤖 由 AI 自动解析生成";
@@ -1813,20 +1645,13 @@
 
   // ── API 设置 ──
   function refreshApiKeyUI() {
-    const config = getAIConfig();
-    const hasKey = config.apiKey && config.apiKey.startsWith("sk-");
-    if (hasKey) {
-      els.apiKeyStatus.textContent = "••••" + config.apiKey.slice(-4);
+    if (aiReady) {
+      els.apiKeyStatus.textContent = aiKeyMasked || "••••----";
       els.apiKeyStatus.className = "api-key-status configured";
-      els.changeApiKeyBtn.textContent = "更换 Key";
     } else {
       els.apiKeyStatus.textContent = "未配置";
       els.apiKeyStatus.className = "api-key-status empty";
-      els.changeApiKeyBtn.textContent = "设置 Key";
     }
-    els.apiKeyInput.classList.add("hidden");
-    els.apiKeyActions.classList.add("hidden");
-    els.apiKeyInput.value = "";
   }
 
   els.apiSettingsBtn.addEventListener("click", () => {
@@ -1839,65 +1664,18 @@
 
   els.closeApiSettings.addEventListener("click", () => {
     els.apiSettings.classList.add("hidden");
-    els.apiKeyInput.classList.add("hidden");
-    els.apiKeyActions.classList.add("hidden");
-  });
-
-  els.changeApiKeyBtn.addEventListener("click", () => {
-    els.apiKeyInput.classList.remove("hidden");
-    els.apiKeyActions.classList.remove("hidden");
-    els.apiKeyInput.value = "";
-    els.apiKeyInput.focus();
-  });
-
-  els.cancelApiKeyBtn.addEventListener("click", () => {
-    els.apiKeyInput.classList.add("hidden");
-    els.apiKeyActions.classList.add("hidden");
-    els.apiKeyInput.value = "";
-  });
-
-  els.saveApiKeyBtn.addEventListener("click", () => {
-    const apiKey = els.apiKeyInput.value.trim();
-    if (!apiKey) { alert("请输入 API Key"); return; }
-    if (!apiKey.startsWith("sk-")) { alert("API Key 格式不正确，应以 sk- 开头"); return; }
-    const config = getAIConfig();
-    config.apiKey = apiKey;
-    saveAIConfig(config);
-    updateAIStatus();
-    refreshApiKeyUI();
-  });
-
-  els.clearApiKeyBtn.addEventListener("click", () => {
-    if (!confirm("确定清除已保存的 API Key？清除后 AI 诊断将不可用。")) return;
-    const config = getAIConfig();
-    config.apiKey = "";
-    saveAIConfig(config);
-    updateAIStatus();
-    refreshApiKeyUI();
   });
 
   els.testApiBtn.addEventListener("click", async () => {
-    const config = getAIConfig();
-    const apiKey = config.apiKey;
-    if (!apiKey || !apiKey.startsWith("sk-")) { alert("请先设置有效的 API Key"); return; }
-
     els.testApiBtn.textContent = "测试中…";
     els.testApiBtn.disabled = true;
     try {
-      const response = await fetch(DEEPSEEK_API, {
-        method: "POST",
-        headers: { "Content-Type": "application/json", "Authorization": `Bearer ${apiKey}` },
-        body: JSON.stringify({ model: DEEPSEEK_MODEL, messages: [{ role: "user", content: "回复：ok" }], max_tokens: 10, temperature: 0 })
-      });
-      if (response.ok) {
-        alert("✅ API 连接成功！DeepSeek 已就绪。");
-        updateAIStatus();
-      } else {
-        const err = await response.json().catch(() => ({}));
-        alert(`❌ 连接失败：${err.error?.message || "HTTP " + response.status}`);
-      }
+      await window.FaultDB.ai.test();
+      aiReady = true;
+      updateAIStatus();
+      alert("✅ API 连接成功！DeepSeek 已就绪。");
     } catch (e) {
-      alert(`❌ 网络错误：${e.message}`);
+      alert(`❌ 连接失败：${e.message}`);
     }
     els.testApiBtn.textContent = "测试连接";
     els.testApiBtn.disabled = false;
@@ -1924,8 +1702,8 @@
     // 加载 IndexedDB 中的导入数据
     await loadImportedData();
 
-    // 初始化 AI 状态
-    updateAIStatus();
+    // 初始化 AI 状态（从后端读取）
+    await loadAIStatus();
 
     if (!mergedDatabase.length) {
       els.dataStatus.textContent = "未读取到故障数据";

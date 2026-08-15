@@ -13,6 +13,7 @@
 'use strict';
 
 const http = require('http');
+const https = require('https');
 const cloudbase = require('@cloudbase/node-sdk');
 
 const app = cloudbase.init({
@@ -333,6 +334,215 @@ function diagnose(body) {
 }
 
 // ---------------------------------------------------------------------------
+// AI (DeepSeek) proxy — Key 存在环境变量 DEEPSEEK_API_KEY，不经过浏览器
+// ---------------------------------------------------------------------------
+
+const DEEPSEEK_API = 'https://api.deepseek.com/v1/chat/completions';
+const DEEPSEEK_MODEL = 'deepseek-chat';
+
+function deepSeekKey() {
+  return process.env.DEEPSEEK_API_KEY || '';
+}
+
+function maskedKey() {
+  const k = deepSeekKey();
+  return k ? '••••' + k.slice(-4) : '';
+}
+
+function httpsPostJson(urlString, headers, bodyJson) {
+  return new Promise((resolve, reject) => {
+    const url = new URL(urlString);
+    const data = JSON.stringify(bodyJson);
+    const req = https.request({
+      hostname: url.hostname,
+      path: url.pathname + url.search,
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        'Content-Length': Buffer.byteLength(data),
+        ...headers,
+      },
+    }, (res) => {
+      let raw = '';
+      res.on('data', (c) => { raw += c; });
+      res.on('end', () => {
+        let parsed = null;
+        try { parsed = JSON.parse(raw); } catch { /* ignore */ }
+        resolve({ status: res.statusCode || 0, data: parsed, raw });
+      });
+    });
+    req.on('error', reject);
+    req.setTimeout(60000, () => req.destroy(new Error('DeepSeek 请求超时')));
+    req.write(data);
+    req.end();
+  });
+}
+
+async function callDeepSeek(messages, opts = {}) {
+  const apiKey = deepSeekKey();
+  if (!apiKey) {
+    const e = new Error('服务端未配置 DeepSeek API Key');
+    e.status = 503;
+    throw e;
+  }
+
+  const resp = await httpsPostJson(DEEPSEEK_API, { Authorization: 'Bearer ' + apiKey }, {
+    model: DEEPSEEK_MODEL,
+    messages,
+    temperature: opts.temperature ?? 0.3,
+    max_tokens: opts.max_tokens ?? 2048,
+    top_p: opts.top_p ?? 0.9,
+  });
+
+  if (resp.status !== 200) {
+    const e = new Error('AI 服务请求失败');
+    e.status = resp.status || 502;
+    if (resp.status === 401) { e.message = 'API Key 无效'; }
+    else if (resp.status === 402) { e.message = 'API 余额不足，请充值'; }
+    else if (resp.status === 429) { e.message = '请求过于频繁，请稍后再试'; }
+    else { e.message = resp.data?.error?.message || ('HTTP ' + resp.status); }
+    throw e;
+  }
+
+  const content = resp.data?.choices?.[0]?.message?.content;
+  if (!content) throw new Error('AI 返回内容为空，请重试');
+  return content;
+}
+
+function extractJson(text) {
+  let content = String(text || '').trim();
+  const m = content.match(/```(?:json)?\s*\n?([\s\S]*?)\n?```/);
+  if (m) content = m[1];
+  content = content.trim();
+  return JSON.parse(content);
+}
+
+const DIAGNOSE_SYSTEM_PROMPT = `你是一名资深的工业设备故障诊断专家，拥有20年现场运维经验。
+
+请根据故障现象和参考知识库，采用"排除法"进行诊断推理，返回严格的 JSON：
+
+{
+  "title": "诊断标题",
+  "summary": "诊断摘要（80-150字）",
+  "severity": "高/中/低",
+  "shutdownRequired": true或false,
+  "estimatedTime": "预计处理时间",
+  "databaseMatch": true或false（此故障类型在参考知识库中是否有匹配条目）,
+  "databaseNote": "如果匹配：说明匹配到了什么；如果未匹配：说明这是新故障类型。20-40字",
+
+  "causes": [
+    { "name": "原因名称", "probability": 40, "evidence": "判断依据一句话" }
+  ],
+
+  "eliminations": [
+    { "cause": "被排除的原因", "ruledOut": true, "reason": "排除依据", "evidence": "相关证据" },
+    { "cause": "被确认的原因", "ruledOut": false, "reason": "确认依据", "evidence": "相关证据" }
+  ],
+
+  "rootCauses": [
+    { "scenario": "具体故障场景描述", "detail": "详细的故障机理说明，讲清楚为什么会发生", "probability": 60 }
+  ],
+
+  "guidance": {
+    "steps": ["排查步骤1", "排查步骤2", "排查步骤3"],
+    "tools": ["所需工具"],
+    "prevention": "预防再发生的建议"
+  },
+
+  "safety": "安全提示"
+}
+
+规则：
+- causes 列出3-5个可能原因，probability 总和100
+- eliminations 至少包含2个被排除项和1个确认项，体现排除推理过程
+- rootCauses 给出1-3个最可能的根因，具体描述故障场景
+- guidance.steps 给出3-5个可操作的排查/整改步骤
+- 必须返回严格合法的 JSON，不要有注释或额外说明`;
+
+const PARSE_SYSTEM_PROMPT = `你是一个工业设备故障数据录入助手。从用户输入的故障描述文本中提取关键信息，返回严格 JSON：
+
+{
+  "id": "唯一英文ID，如 rs485-resistor-burn",
+  "deviceType": "设备类型，如 通讯电路板",
+  "title": "故障标题，20字以内",
+  "symptoms": ["故障现象1", "故障现象2"],
+  "keywords": ["关键词1", "关键词2"],
+  "summary": "诊断摘要，80-150字",
+  "severity": "高/中/低",
+  "shutdownRequired": true或false,
+  "causes": [{"name": "原因", "probability": 40, "evidence": "依据"}],
+  "solutions": [{"action": "措施", "detail": "说明", "tools": ["工具"], "duration": "耗时"}],
+  "diagram": [{"title": "步骤", "description": "说明"}],
+  "safety": "安全提示"
+}
+
+只返回JSON，不要markdown标记。`;
+
+function aiStatus() {
+  return json({ configured: !!deepSeekKey(), keyMasked: maskedKey() });
+}
+
+async function aiDiagnose(body) {
+  if (!body || typeof body !== 'object' || !body.symptom) {
+    return error('缺少 symptom 字段', 400);
+  }
+
+  const symptom = String(body.symptom).slice(0, 300);
+  const deviceType = body.deviceType ? String(body.deviceType) : '';
+  const knowledgeContext = Array.isArray(body.knowledgeContext) ? body.knowledgeContext : [];
+
+  const deviceInfo = deviceType ? `设备类型：${deviceType}` : '设备类型：未指定';
+  const knowledgeText = knowledgeContext.length
+    ? `\n【参考知识库】\n${knowledgeContext.map((k, i) => `${i + 1}. ${k.title}：${k.summary}\n   可能原因：${(k.causes || []).join('、')}\n   解决措施：${(k.solutions || []).join('、')}`).join('\n')}`
+    : '';
+
+  const userMessage = `${deviceInfo}\n【故障现象】${symptom}${knowledgeText}\n\n请按照系统提示的 JSON 格式返回诊断结果，采用排除法进行推理分析。只返回 JSON，不要包含 markdown 代码块标记。`;
+
+  const content = await callDeepSeek([
+    { role: 'system', content: DIAGNOSE_SYSTEM_PROMPT },
+    { role: 'user', content: userMessage },
+  ], { temperature: 0.3, max_tokens: 2048, top_p: 0.9 });
+
+  const result = extractJson(content);
+  return json({
+    id: 'ai-' + Date.now(),
+    deviceType: deviceType || '通用',
+    title: result.title || '故障诊断结果',
+    symptoms: [symptom],
+    keywords: result.causes?.map(c => c.name) || [],
+    summary: result.summary || '',
+    severity: result.severity || '中',
+    shutdownRequired: Boolean(result.shutdownRequired),
+    estimatedTime: result.estimatedTime || '',
+    databaseMatch: Boolean(result.databaseMatch),
+    databaseNote: result.databaseNote || '',
+    causes: Array.isArray(result.causes) ? result.causes : [],
+    eliminations: Array.isArray(result.eliminations) ? result.eliminations : [],
+    rootCauses: Array.isArray(result.rootCauses) ? result.rootCauses : [],
+    guidance: result.guidance || { steps: [], tools: [], prevention: '' },
+    safety: result.safety || '',
+    matchScore: result.matchScore || 85,
+  });
+}
+
+async function aiParse(body) {
+  if (!body || !body.text) return error('缺少 text 字段', 400);
+  const text = String(body.text).slice(0, 20000);
+
+  const content = await callDeepSeek([
+    { role: 'system', content: PARSE_SYSTEM_PROMPT },
+    { role: 'user', content: text },
+  ], { temperature: 0.2, max_tokens: 2048 });
+
+  return json(extractJson(content));
+}
+
+async function aiTest() {
+  await callDeepSeek([{ role: 'user', content: '回复：ok' }], { max_tokens: 10, temperature: 0 });
+  return json({ ok: true });
+}
+
+// ---------------------------------------------------------------------------
 // Router
 // ---------------------------------------------------------------------------
 
@@ -360,6 +570,12 @@ const ROUTES = [
   { method: 'GET',    pattern: /^\/files\/?$/,               handler: () => listFiles() },
   { method: 'POST',   pattern: /^\/files\/?$/,               handler: (body) => markFile(body) },
   { method: 'DELETE', pattern: /^\/files\/?$/,               handler: () => clearFiles() },
+
+  // AI (DeepSeek) proxy
+  { method: 'GET',    pattern: /^\/ai\/status\/?$/,          handler: () => aiStatus() },
+  { method: 'POST',   pattern: /^\/ai\/diagnose\/?$/,        handler: (body) => aiDiagnose(body) },
+  { method: 'POST',   pattern: /^\/ai\/parse\/?$/,           handler: (body) => aiParse(body) },
+  { method: 'POST',   pattern: /^\/ai\/test\/?$/,            handler: () => aiTest() },
 ];
 
 // ---------------------------------------------------------------------------
@@ -399,7 +615,8 @@ const server = http.createServer(async (req, res) => {
       return;
     } catch (e) {
       console.error('[cloudbase]', e);
-      res.writeHead(500, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
+      const status = Number(e.status) || 500;
+      res.writeHead(status, { ...cors, 'Content-Type': 'application/json; charset=utf-8' });
       res.end(JSON.stringify({ error: e.message || 'Internal server error' }));
       return;
     }

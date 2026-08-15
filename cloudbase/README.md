@@ -28,3 +28,11 @@ tcb db nosql execute -e fault-diagnosis-d5fe6kc909f3385d --command '[{"TableName
 ```
 
 > Windows PowerShell 下 `--command`/`--data` 的 JSON 双引号会被剥掉，建议用 Node `spawnSync` 传参，或改用 WSL/Git Bash。
+
+## AI Key 配置
+
+AI 诊断走云函数代理（`/ai/*` 端点），DeepSeek Key 存在云函数环境变量 `DEEPSEEK_API_KEY`，不经过浏览器、也不提交到 git。
+
+- 当前线上函数已配置好 Key。
+- 重新部署前，把真实 Key 临时填进 `cloudbaserc.json` 的 `envVariables.DEEPSEEK_API_KEY`（本地 `.env` 里存了一份），部署完再删掉，避免提交到 git。
+- 也可在腾讯云控制台「云函数 → 函数配置 → 环境变量」里设置，一劳永逸、不经过 git。

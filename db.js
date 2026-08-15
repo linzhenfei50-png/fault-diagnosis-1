@@ -161,8 +161,40 @@
   };
 
   // ======================================================================
+  // AI (DeepSeek) — 由后端云函数代理转发，Key 不经过浏览器
+  // ======================================================================
+
+  const ai = {
+    /** 获取 AI 服务状态（是否已配置 + 掩码后的 Key 后四位） */
+    async status() {
+      return apiFetch("/ai/status", {}, { configured: false, keyMasked: "" });
+    },
+
+    /** 调用 AI 诊断，返回结构化诊断结果 */
+    async diagnose(payload) {
+      return apiFetch("/ai/diagnose", {
+        method: "POST",
+        body: JSON.stringify(payload),
+      });
+    },
+
+    /** AI 解析故障描述文本，返回结构化条目 */
+    async parse(text) {
+      return apiFetch("/ai/parse", {
+        method: "POST",
+        body: JSON.stringify({ text }),
+      });
+    },
+
+    /** 测试 DeepSeek 连接 */
+    async test() {
+      return apiFetch("/ai/test", { method: "POST" });
+    },
+  };
+
+  // ======================================================================
   // Expose
   // ======================================================================
 
-  window.FaultDB = { faultData, history, files };
+  window.FaultDB = { faultData, history, files, ai };
 })();

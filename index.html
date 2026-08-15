@@ -102,18 +102,11 @@
               <span>DeepSeek API Key</span>
               <div style="display:flex; gap:8px; align-items:center;">
                 <span id="apiKeyStatus" class="api-key-status">—</span>
-                <input type="password" id="apiKeyInput" class="hidden" placeholder="sk-..." autocomplete="off" />
-                <button id="changeApiKeyBtn" class="outline-button" type="button">更换 Key</button>
               </div>
-              <small style="color:var(--text-tertiary); font-size:11px;">Key 仅保存在浏览器本地，设置后无法查看，只能更换。</small>
-            </div>
-            <div id="apiKeyActions" class="hidden" style="display:flex; gap:8px; align-items:flex-end;">
-              <button id="saveApiKeyBtn" class="primary-button" type="button">保存</button>
-              <button id="cancelApiKeyBtn" class="text-button" type="button">取消</button>
+              <small style="color:var(--text-tertiary); font-size:11px;">Key 已配置在服务器端，界面上只显示后四位，无法查看或更改。</small>
             </div>
             <div style="display:flex; gap:8px; align-items:flex-end;">
               <button id="testApiBtn" class="outline-button" type="button">测试连接</button>
-              <button id="clearApiKeyBtn" class="text-button" type="button" style="color:var(--danger);">清除 Key</button>
             </div>
           </div>
         </section>
