@@ -432,6 +432,12 @@
 
     // ── 渲染结果 ──
     if (aiResult) {
+      // 所选电路类型下没有任何知识条目时，强制标记为「新故障类型」，
+      // 避免 AI 在空知识上下文里误判成「已有记录」。
+      if (!scored.length) {
+        aiResult.databaseMatch = false;
+        aiResult.databaseNote = "所选电路类型在知识库中暂无匹配记录，属于新故障类型";
+      }
       renderResult(aiResult, aiResult.matchScore || 85, aiResult.keywords || [], input, true);
       saveHistory(input, aiResult, aiResult.matchScore || 85, aiResult.keywords || []);
     } else if (scored.length) {
