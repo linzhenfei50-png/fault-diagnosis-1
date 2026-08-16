@@ -44,7 +44,8 @@
     // 诊断报告
     dbMatchBadge: $("#dbMatchBadge"),
     resultTitle: $("#resultTitle"),
-    resultSummary: $("#resultSummary"),
+    resultAnalysis: $("#resultAnalysis"),
+    resultSolution: $("#resultSolution"),
     severityBadge: $("#severityBadge"),
     shutdownBadge: $("#shutdownBadge"),
     timeBadge: $("#timeBadge"),
@@ -128,7 +129,8 @@
     textEntryTitle: $("#textEntryTitle"),
     textEntrySymptoms: $("#textEntrySymptoms"),
     textEntryKeywords: $("#textEntryKeywords"),
-    textEntrySummary: $("#textEntrySummary"),
+    textEntryAnalysis: $("#textEntryAnalysis"),
+    textEntrySolution: $("#textEntrySolution"),
     textEntrySeverity: $("#textEntrySeverity"),
     saveTextEntryBtn: $("#saveTextEntryBtn"),
     jsonPasteInput: $("#jsonPasteInput"),
@@ -226,7 +228,8 @@
       circuits,
       knowledgeContext: (knowledgeContext || []).map(k => ({
         title: k.title,
-        summary: k.summary,
+        analysis: k.analysis || k.summary || "",
+        solution: k.solution || "",
         causes: (k.causes || []).map(c => c && c.name).filter(Boolean),
         solutions: (k.solutions || []).map(s => s && s.action).filter(Boolean),
       })),
@@ -469,7 +472,8 @@
 
     /* ---- 报告头部 ---- */
     els.resultTitle.textContent = item.title;
-    els.resultSummary.textContent = item.summary;
+    els.resultAnalysis.textContent = item.analysis || item.summary || "未提供";
+    els.resultSolution.textContent = item.solution || "未提供";
     els.severityBadge.textContent = `严重等级：${item.severity || "未定义"}`;
     els.severityBadge.style.background = severityColor(item.severity);
     els.shutdownBadge.textContent = item.shutdownRequired ? "建议停机" : "可在安全条件下继续排查";
@@ -754,7 +758,10 @@
                 <span>等级：${escapeHtml(entry.severity || "—")}</span>
                 <span>关键词：${(entry.keywords || []).slice(0, 4).join("、") || "—"}</span>
               </div>
-              <p class="kn-summary">${escapeHtml(entry.summary || "")}</p>
+              <div class="kn-analysis-solution">
+                <p class="kn-summary"><strong>故障分析：</strong>${escapeHtml(entry.analysis || entry.summary || "")}</p>
+                <p class="kn-summary"><strong>解决措施：</strong>${escapeHtml(entry.solution || "")}</p>
+              </div>
               ${isImported(entry.id) ? `<button class="text-button kn-delete" data-kn-id="${escapeHtml(entry.id)}" style="color:var(--danger); font-size:12px;">删除此条</button>` : ""}
             </div>
           `).join("")}
@@ -779,7 +786,8 @@
         title: obj.title,
         symptoms: Array.isArray(obj.symptoms) ? obj.symptoms : [],
         keywords: Array.isArray(obj.keywords) ? obj.keywords : [],
-        summary: obj.summary || "",
+        analysis: obj.analysis || obj.summary || "",
+        solution: obj.solution || "",
         severity: obj.severity || "中",
         shutdownRequired: Boolean(obj.shutdownRequired),
         estimatedTime: obj.estimatedTime || "",
@@ -1457,7 +1465,8 @@
     els.textEntryTitle.value = data.title || "";
     els.textEntrySymptoms.value = (data.symptoms || []).join("；") || "";
     els.textEntryKeywords.value = (data.keywords || []).join("，");
-    els.textEntrySummary.value = data.summary || "";
+    els.textEntryAnalysis.value = data.analysis || data.summary || "";
+    els.textEntrySolution.value = data.solution || "";
     els.textEntrySeverity.value = data.severity || "中";
     els.textEntryForm.classList.remove("hidden");
   }
@@ -1470,7 +1479,8 @@
       title: els.textEntryTitle.value.trim(),
       symptoms: els.textEntrySymptoms.value.trim().split(/[；;，,、]/).map(s => s.trim()).filter(Boolean),
       keywords: els.textEntryKeywords.value.trim().split(/[，,、]/).map(s => s.trim()).filter(Boolean),
-      summary: els.textEntrySummary.value.trim(),
+      analysis: els.textEntryAnalysis.value.trim(),
+      solution: els.textEntrySolution.value.trim(),
       severity: els.textEntrySeverity.value,
       shutdownRequired: els.textEntrySeverity.value === "高",
       estimatedTime: "",
@@ -1518,7 +1528,8 @@
       title: "",
       symptoms: text ? [text] : [],
       keywords: [],
-      summary: text || "",
+      analysis: text || "",
+      solution: "",
       severity: "中",
       causes: [],
       solutions: [],
@@ -1534,7 +1545,7 @@
   els.saveTextEntryBtn.addEventListener("click", async () => {
     const entry = collectTextEntry();
     if (!entry.id || !entry.title) { alert("请至少填写故障 ID 和标题"); return; }
-    if (entry.summary.length < 10) { alert("诊断摘要至少需要 10 个字符"); return; }
+    if ((entry.analysis || "").length < 10) { alert("故障分析至少需要 10 个字符"); return; }
 
     try {
       await window.FaultDB.faultData.saveAll([entry]);
@@ -1556,7 +1567,7 @@
       els.textEntryForm.classList.add("hidden");
       els.textEntryId.value = "";
       els.textEntryTitle.value = ""; els.textEntrySymptoms.value = "";
-      els.textEntryKeywords.value = ""; els.textEntrySummary.value = "";
+      els.textEntryKeywords.value = ""; els.textEntryAnalysis.value = ""; els.textEntrySolution.value = "";
       els.textEntryFaultCount.value = "1";
       renderImportedFiles();
     } catch (e) {
@@ -1648,7 +1659,8 @@
       title,
       symptoms: [els.imageEntryDesc.value.trim() || title],
       keywords: [],
-      summary: els.imageEntryDesc.value.trim() || title,
+      analysis: els.imageEntryDesc.value.trim() || title,
+      solution: "",
       severity: "中",
       shutdownRequired: false,
       estimatedTime: "",
@@ -1777,7 +1789,8 @@
       .map(s => ({
         title: s.item.title,
         circuit: s.item.circuit,
-        summary: s.item.summary,
+        analysis: s.item.analysis || s.item.summary,
+        solution: s.item.solution,
         causes: (s.item.causes || []).map(c => c && c.name).filter(Boolean),
         solutions: (s.item.solutions || []).map(x => x && x.action).filter(Boolean),
       }));
@@ -1905,7 +1918,8 @@
           title: currentResultItem.title || "诊断结果",
           symptoms: [currentResultInput],
           keywords: [],
-          summary: currentResultItem.summary || "",
+          analysis: currentResultItem.analysis || currentResultItem.summary || "",
+          solution: currentResultItem.solution || "",
           severity: currentResultItem.severity || "中",
           shutdownRequired: Boolean(currentResultItem.shutdownRequired),
           estimatedTime: currentResultItem.estimatedTime || "",

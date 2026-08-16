@@ -462,6 +462,13 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   font-size: 14px;
   line-height: 1.7;
 }
+.report-summary-block {
+  display: flex;
+  flex-direction: column;
+  gap: 6px;
+  margin-top: 10px;
+}
+.report-summary-block strong { color: var(--text); }
 
 /* Report Step Card */
 .report-step {

@@ -12,7 +12,8 @@
  * title            诊断方案标题
  * symptoms         常见故障现象
  * keywords         关键词，可选，越贴近用户输入越容易匹配
- * summary          诊断摘要
+ * analysis         故障分析（故障原因与机理）
+ * solution         解决措施（处理办法）
  * severity         严重等级：低 / 中 / 高
  * shutdownRequired 是否建议停机
  * estimatedTime    预计处理时间

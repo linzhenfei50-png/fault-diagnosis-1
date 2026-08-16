@@ -131,7 +131,10 @@
                 <button id="saveToKbBtn" class="outline-button small" type="button">💾 保存到知识库</button>
               </div>
             </div>
-            <p class="report-summary" id="resultSummary">—</p>
+            <div class="report-summary-block">
+              <p class="report-summary"><strong>故障分析：</strong><span id="resultAnalysis">—</span></p>
+              <p class="report-summary"><strong>解决措施：</strong><span id="resultSolution">—</span></p>
+            </div>
           </article>
 
           <!-- 步骤 1：故障识别 -->
@@ -357,7 +360,8 @@ RS485通讯电路板上A、B线路上的限流电阻出现烧毁现象。经排�
                 </div>
                 <label class="field" style="margin-top:8px;"><span>故障现象</span><input type="text" id="textEntrySymptoms" placeholder="如：A、B线路限流电阻烧毁" /></label>
                 <label class="field" style="margin-top:8px;"><span>关键词（可选，逗号分隔）</span><input type="text" id="textEntryKeywords" placeholder="如：RS485, 电阻, 烧毁, 限流（可留空）" /></label>
-                <label class="field" style="margin-top:8px;"><span>诊断摘要</span><textarea id="textEntrySummary" rows="2" placeholder="对故障的简要分析…"></textarea></label>
+                <label class="field" style="margin-top:8px;"><span>故障分析</span><textarea id="textEntryAnalysis" rows="2" placeholder="故障原因与机理分析…"></textarea></label>
+                <label class="field" style="margin-top:8px;"><span>解决措施</span><textarea id="textEntrySolution" rows="2" placeholder="处理办法与整改措施…"></textarea></label>
                 <label class="field" style="margin-top:8px;">
                   <span>严重等级</span>
                   <select id="textEntrySeverity"><option value="中">中</option><option value="高">高</option><option value="低">低</option></select>
