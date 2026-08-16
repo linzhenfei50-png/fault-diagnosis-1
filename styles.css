@@ -973,6 +973,61 @@ select { appearance: none; background-image: url("data:image/svg+xml,%3Csvg xmln
   flex-shrink: 0;
 }
 
+/* 知识库二级目录：按故障标题折叠 */
+.kn-title-group {
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius);
+  background: #fff;
+  overflow: hidden;
+}
+.kn-title-summary {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  padding: 11px 14px;
+  cursor: pointer;
+  list-style: none;
+  user-select: none;
+}
+.kn-title-summary::-webkit-details-marker { display: none; }
+.kn-title-arrow {
+  font-size: 12px;
+  color: var(--text-tertiary);
+  transition: transform .15s ease;
+  flex-shrink: 0;
+}
+.kn-title-group[open] > .kn-title-summary .kn-title-arrow { transform: rotate(90deg); }
+.kn-title-text { font-size: 14px; font-weight: 600; color: var(--text); flex: 1; min-width: 0; }
+.kn-title-body {
+  display: grid;
+  gap: 10px;
+  padding: 2px 14px 14px;
+}
+
+/* 单个知识条目的展开详情 */
+.kn-detail {
+  padding: 12px 14px;
+  border: 1px solid var(--border-light);
+  border-radius: var(--radius-sm);
+  background: #fafbfd;
+}
+.kn-detail.imported { border-left: 3px solid var(--primary); }
+.kn-detail.built-in { border-left: 3px solid #d5dae5; }
+.kn-detail-section { margin-top: 10px; }
+.kn-detail-label {
+  display: block;
+  font-size: 12px;
+  font-weight: 700;
+  color: var(--text);
+  margin-bottom: 4px;
+}
+.kn-detail-text { font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.kn-detail-list { margin: 4px 0 0 16px; font-size: 13px; color: var(--text-secondary); line-height: 1.6; }
+.kn-detail-list li + li { margin-top: 6px; }
+.kn-detail-sub { font-size: 12px; color: var(--text-tertiary); margin-top: 2px; }
+.kn-prob { color: var(--warning); font-weight: 600; font-size: 12px; }
+.kn-shutdown { color: #e34b4b; font-weight: 600; }
+
 /* ================================================================
    Import Panel
    ================================================================ */

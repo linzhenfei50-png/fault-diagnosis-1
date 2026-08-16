@@ -712,6 +712,63 @@
   /* ================================================================
    *  知识库管理
    * ================================================================ */
+  // 渲染单个知识条目的展开详情（故障分析 / 解决措施 / 原因 / 排查流程 / 安全提示等）
+  function knowledgeDetailHtml(entry, isImported) {
+    const causes = entry.causes || [];
+    const solutions = entry.solutions || [];
+    const diagram = entry.diagram || [];
+    const symptoms = entry.symptoms || [];
+    const keywords = entry.keywords || [];
+
+    const causeHtml = causes.length ? `
+      <div class="kn-detail-section">
+        <span class="kn-detail-label">🔍 可能原因</span>
+        <ul class="kn-detail-list">
+          ${causes.map(c => `<li><strong>${escapeHtml(c.name)}</strong>${c.probability != null ? ` <span class="kn-prob">${Number(c.probability) || 0}%</span>` : ""}${c.evidence ? `<div class="kn-detail-sub">${escapeHtml(c.evidence)}</div>` : ""}</li>`).join("")}
+        </ul>
+      </div>` : "";
+
+    const solutionHtml = solutions.length ? `
+      <div class="kn-detail-section">
+        <span class="kn-detail-label">🛠 解决措施</span>
+        <ul class="kn-detail-list">
+          ${solutions.map(s => `<li><strong>${escapeHtml(s.action)}</strong>${s.detail ? `<div class="kn-detail-sub">${escapeHtml(s.detail)}</div>` : ""}${s.tools && s.tools.length ? `<div class="kn-detail-sub">工具：${s.tools.map(t => escapeHtml(t)).join("、")}</div>` : ""}${s.duration ? `<div class="kn-detail-sub">耗时：${escapeHtml(s.duration)}</div>` : ""}</li>`).join("")}
+        </ul>
+      </div>` : "";
+
+    const diagramHtml = diagram.length ? `
+      <div class="kn-detail-section">
+        <span class="kn-detail-label">🧭 排查流程</span>
+        <ol class="kn-detail-list">
+          ${diagram.map(d => `<li><strong>${escapeHtml(d.title)}</strong>${d.description ? `<div class="kn-detail-sub">${escapeHtml(d.description)}</div>` : ""}</li>`).join("")}
+        </ol>
+      </div>` : "";
+
+    return `
+      <div class="kn-detail ${isImported ? "imported" : "built-in"}">
+        <div class="kn-meta">
+          <span>等级：${escapeHtml(entry.severity || "—")}</span>
+          ${entry.shutdownRequired ? `<span class="kn-shutdown">建议停机</span>` : ""}
+          ${entry.estimatedTime ? `<span>预计耗时：${escapeHtml(entry.estimatedTime)}</span>` : ""}
+        </div>
+        ${symptoms.length ? `<div class="kn-detail-section"><span class="kn-detail-label">⚠️ 故障现象</span><div class="kn-detail-text">${escapeHtml(symptoms.join("；"))}</div></div>` : ""}
+        ${keywords.length ? `<div class="kn-detail-section"><span class="kn-detail-label">🏷 关键词</span><div class="kn-detail-text">${keywords.map(k => escapeHtml(k)).join("、")}</div></div>` : ""}
+        <div class="kn-detail-section">
+          <span class="kn-detail-label">📝 故障分析</span>
+          <div class="kn-detail-text">${escapeHtml(entry.analysis || entry.summary || "—")}</div>
+        </div>
+        <div class="kn-detail-section">
+          <span class="kn-detail-label">✅ 解决措施</span>
+          <div class="kn-detail-text">${escapeHtml(entry.solution || "—")}</div>
+        </div>
+        ${causeHtml}
+        ${solutionHtml}
+        ${diagramHtml}
+        ${entry.safety ? `<div class="kn-detail-section"><span class="kn-detail-label">🦺 安全提示</span><div class="kn-detail-text">${escapeHtml(entry.safety)}</div></div>` : ""}
+        ${isImported ? `<button class="text-button kn-delete" data-kn-id="${escapeHtml(entry.id)}" style="color:var(--danger); font-size:12px;">删除此条</button>` : ""}
+      </div>`;
+  }
+
   async function renderKnowledgeList(filterText) {
     try {
       const imported = await window.FaultDB.faultData.getAll();
@@ -733,44 +790,49 @@
 
       const isImported = (id) => imported.some(e => e.id === id);
 
-      // 按电路分组
-      const groups = new Map();
+      // 按电路分组（一级目录）
+      const circuitGroups = new Map();
       list.forEach(entry => {
         const circuit = entry.circuit || entry.deviceType || "未分类";
-        if (!groups.has(circuit)) groups.set(circuit, []);
-        groups.get(circuit).push(entry);
+        if (!circuitGroups.has(circuit)) circuitGroups.set(circuit, []);
+        circuitGroups.get(circuit).push(entry);
       });
 
-      els.knowledgeList.innerHTML = [...groups.entries()].map(([circuit, entries]) => {
+      els.knowledgeList.innerHTML = [...circuitGroups.entries()].map(([circuit, entries]) => {
         const totalCount = entries.reduce((sum, e) => sum + (Number(e.faultCount) || 1), 0);
+
+        // 按故障标题分组（二级目录），同一标题的故障合并展示
+        const titleGroups = new Map();
+        entries.forEach(entry => {
+          const key = (entry.title || "未命名").trim();
+          if (!titleGroups.has(key)) titleGroups.set(key, []);
+          titleGroups.get(key).push(entry);
+        });
+
+        const titleHtml = [...titleGroups.entries()].map(([title, titleEntries]) => {
+          const tCount = titleEntries.reduce((sum, e) => sum + (Number(e.faultCount) || 1), 0);
+          const allImported = titleEntries.every(e => isImported(e.id));
+          return `
+          <details class="kn-title-group">
+            <summary class="kn-title-summary">
+              <span class="kn-title-arrow">▸</span>
+              <strong class="kn-title-text">${escapeHtml(title)}</strong>
+              <span class="fault-count-badge">故障 ×${tCount}</span>
+              <span class="kn-badge ${allImported ? "kn-imported" : "kn-builtin"}">${allImported ? "导入" : "内置"}</span>
+            </summary>
+            <div class="kn-title-body">
+              ${titleEntries.map(entry => knowledgeDetailHtml(entry, isImported(entry.id))).join("")}
+            </div>
+          </details>`;
+        }).join("");
+
         return `
         <div class="kn-group">
           <div class="kn-group-header">
             <span>🔌 ${escapeHtml(circuit)}</span>
             <span class="kn-group-stat">共 ${entries.length} 条 · 累计故障 ${totalCount} 次</span>
           </div>
-          ${entries.map(entry => `
-            <div class="knowledge-card ${isImported(entry.id) ? "imported" : "built-in"}">
-              <div class="kn-header">
-                <strong>${escapeHtml(entry.title)}</strong>
-                <div class="kn-header-right">
-                  <span class="fault-count-badge">故障 ×${Number(entry.faultCount) || 1}</span>
-                  <span class="kn-badge ${isImported(entry.id) ? "kn-imported" : "kn-builtin"}">
-                    ${isImported(entry.id) ? "导入" : "内置"}
-                  </span>
-                </div>
-              </div>
-              <div class="kn-meta">
-                <span>等级：${escapeHtml(entry.severity || "—")}</span>
-                <span>关键词：${(entry.keywords || []).slice(0, 4).join("、") || "—"}</span>
-              </div>
-              <div class="kn-analysis-solution">
-                <p class="kn-summary"><strong>故障分析：</strong>${escapeHtml(entry.analysis || entry.summary || "")}</p>
-                <p class="kn-summary"><strong>解决措施：</strong>${escapeHtml(entry.solution || "")}</p>
-              </div>
-              ${isImported(entry.id) ? `<button class="text-button kn-delete" data-kn-id="${escapeHtml(entry.id)}" style="color:var(--danger); font-size:12px;">删除此条</button>` : ""}
-            </div>
-          `).join("")}
+          ${titleHtml}
         </div>`;
       }).join("") || `<p class="history-empty">暂无匹配的知识条目。</p>`;
     } catch (e) {
